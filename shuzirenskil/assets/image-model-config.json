@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "provider": "user-configured-image-provider",
+  "generation_path": "/v1/images/generations",
+  "editing_path": "/v1/images/edits",
+  "model": "gpt-image-2",
+  "api_key_env": "OPENAI_API_KEY",
+  "base_url_env": "OPENAI_BASE_URL",
+  "sizes": {
+    "9:16": "1024x1536",
+    "16:9": "1536x1024"
+  },
+  "output_policy": "center_crop_to_exact_video_aspect_ratio",
+  "notes": "The Skill uses this third-party image route directly after plan confirmation. Secrets remain in a private .env file."
+}

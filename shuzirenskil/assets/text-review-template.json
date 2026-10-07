@@ -1,0 +1,12 @@
+{
+  "text_review": {
+    "manifest_file": "inspect-visuals 生成的 manifest.json 绝对路径",
+    "manifest_sha256": "命令输出的 SHA-256",
+    "reviewer": "agent_visual",
+    "full_video_viewed": false,
+    "all_sampled_frames_viewed": false,
+    "last_frame_viewed": false,
+    "text_present": null,
+    "observations": "实际看完后填写；任何文字出现即失败，无法确认保持 pending"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "canonical_sha256": "从 project.json 复制",
+  "image_set_digest": "从 project.json 复制",
+  "voice_signature": "从 project.json 复制",
+  "visible_observations": "记录实际看过图片中的发型、服装、构图等可见事实",
+  "casting_fit": "pending",
+  "casting_observations": "说明已选声音为何适合呈现角色，不能声称从脸识别真实声音",
+  "reference_text_free": "pending",
+  "reference_text_observations": "逐张查看所有生产参考图，说明文字或标识检查结果"
+}

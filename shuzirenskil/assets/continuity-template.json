@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "character_identity": "同一位已确认的成年数字人，脸型、五官、发型和年龄观感固定",
+  "wardrobe": "服装款式、颜色、领口和配饰固定",
+  "scene": "背景空间、家具位置和景深固定",
+  "camera": "固定中近景、平视机位、人物居中、镜头高度和焦段不变",
+  "lighting": "主光方向、色温、亮度和面部阴影固定",
+  "motion_policy": "允许自然眨眼、呼吸与轻微姿态变化；手势只在台词重点出现并自然回位，不夸张、不离开画面",
+  "voice_strategy": "prompt_generated_voice"
+}
