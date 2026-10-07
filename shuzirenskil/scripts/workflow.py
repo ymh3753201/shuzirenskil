@@ -373,6 +373,7 @@ def command_generate_image(args: argparse.Namespace) -> None:
         input_transport=args.input_transport,
         provider=getattr(args, "provider", None),
         allow_derived_segment_images_with_risk=False,
+        image_source="third_party_gpt_image_2",
     )
     if args.input_transport == "public-https" and not bind_args.provider_image_url:
         raise ValueError(
@@ -399,6 +400,61 @@ def command_generate_image(args: argparse.Namespace) -> None:
         "status": "reference_image_ready_for_second_confirmation",
         "image": str((args.project_dir / "assets" / "production" / "canonical.png").resolve()),
         "model": config["model"],
+        "additional_user_confirmation_before_image_generation": False,
+    }, ensure_ascii=False, indent=2))
+
+
+def command_bind_generated_image(args: argparse.Namespace) -> None:
+    """Normalize and bind a real image made by Codex's built-in image tool."""
+    project = load_project(args.project_dir)
+    _verify_plan_digest(project)
+    if project["route"] != "video_generation" or project["state"]["stage"] != "awaiting_image_binding":
+        raise ValueError("只有方案确认后、图片确认前才能绑定内置生图结果")
+    if project["plan"]["minimum_paid_segment_count"] > 1 and not args.continuity_spec:
+        raise ValueError("多段视频绑定图片前必须准备一致性说明")
+    source = require_file(args.image_file, "Codex 内置生图的实际文件")
+    prompt_path = require_file(args.prompt_file, "已确认方案中的图片提示词")
+    if len(prompt_path.read_text(encoding="utf-8-sig").strip()) < 20:
+        raise ValueError("图片提示词过短，无法核对生成图与已确认方案")
+    generated_dir = args.project_dir / "assets" / "generated"
+    canonical_path = generated_dir / "canonical.png"
+    if source.resolve() == canonical_path.resolve():
+        raise ValueError("内置生图原文件不能覆盖规范化后的生产图片")
+    technical = normalize_reference_image(source, canonical_path, project["settings"]["aspect_ratio"])
+    bind_args = argparse.Namespace(
+        project_dir=args.project_dir,
+        image=[],
+        canonical_image=canonical_path,
+        segment_image=[],
+        reference_image=[],
+        reference_role=["identity"] if project["settings"].get("generation_mode") == "reference-to-video" else [],
+        storyboard_image=[],
+        continuity_spec=args.continuity_spec,
+        provider_image_url=[],
+        provider_image_file_id=[],
+        provider_reference_image_url=[],
+        provider_reference_image_file_id=[],
+        input_transport="auto",
+        provider=getattr(args, "provider", None),
+        allow_derived_segment_images_with_risk=False,
+        image_source="codex_builtin_image",
+    )
+    command_bind_image(bind_args)
+    project = load_project(args.project_dir)
+    project["image_generation"] = {
+        "provider": "codex_builtin_image",
+        "model": "host_managed",
+        "prompt_sha256": sha256_file(prompt_path),
+        "source_image_sha256": sha256_file(source),
+        "normalized_technical": technical,
+        "generated_at": now_iso(),
+        "user_confirmation_required_next": True,
+    }
+    save_project(args.project_dir, project)
+    print(json.dumps({
+        "status": "reference_image_ready_for_second_confirmation",
+        "image": str((args.project_dir / "assets" / "production" / "canonical.png").resolve()),
+        "provider": "codex_builtin_image",
         "additional_user_confirmation_before_image_generation": False,
     }, ensure_ascii=False, indent=2))
 
@@ -611,7 +667,7 @@ def command_bind_image(args: argparse.Namespace) -> None:
     canonical = _copy_input(canonical_source, canonical_target)
     canonical.update({
         "role": "canonical_video_source",
-        "source": "third_party_gpt_image_2_or_user_confirmed",
+        "source": getattr(args, "image_source", "user_confirmed_reference"),
         "technical": validate_reference_image(canonical_target, project["settings"]["aspect_ratio"]),
     })
     assets.append(canonical)
@@ -659,7 +715,7 @@ def command_bind_image(args: argparse.Namespace) -> None:
         copied = _copy_input(source, target)
         copied.update({
             "role": "derived_segment_source",
-            "source": "gpt_image_2_derived_from_canonical",
+            "source": "derived_from_canonical",
             "parent_canonical_sha256": canonical["sha256"],
             "technical": validate_reference_image(target, project["settings"]["aspect_ratio"]),
         })
@@ -1873,6 +1929,12 @@ def build_parser() -> argparse.ArgumentParser:
     generate_image_parser.add_argument("--config", type=Path)
     generate_image_parser.add_argument("--timeout", type=float, default=180.0)
     generate_image_parser.set_defaults(handler=command_generate_image)
+
+    built_in_image_parser = subparsers.add_parser("bind-generated-image")
+    built_in_image_parser.add_argument("--image-file", type=Path, required=True, help="Codex 内置生图保存到本机的真实图片文件")
+    built_in_image_parser.add_argument("--prompt-file", type=Path, required=True, help="第一次确认的图片提示词")
+    built_in_image_parser.add_argument("--continuity-spec", type=Path, help="多段视频必需的一致性 JSON")
+    built_in_image_parser.set_defaults(handler=command_bind_generated_image)
 
     bind = subparsers.add_parser("bind-image")
     bind.add_argument("--image", type=Path, action="append", help="兼容旧用法：只接受一张主参考图")

@@ -41,6 +41,7 @@ class ImageProviderTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         source = self.root / "source.png"
+        self.source = source
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=1024x1536:d=0.1", "-frames:v", "1", str(source)
         ], check=True, capture_output=True)
@@ -96,6 +97,24 @@ class ImageProviderTests(unittest.TestCase):
         self.assertEqual(ImageHandler.paths, ["/v1/images/generations"])
         self.assertEqual(set(ImageHandler.payloads[0]), {"model", "prompt", "size", "n"})
         self.assertTrue((project / "assets" / "production" / "canonical.png").is_file())
+
+    def test_builtin_image_binds_without_image_api_key_or_provider_post(self) -> None:
+        project = self.root / "builtin-project"
+        script = self.root / "builtin-script.txt"
+        script.write_text("这是一段用于测试内置生图流程的完整口播。", encoding="utf-8")
+        prompt = self.root / "builtin-prompt.txt"
+        prompt.write_text("一位成年中文数字人面向镜头，固定室内场景和柔和灯光，竖屏构图，画面中没有任何文字。", encoding="utf-8")
+        self.run_cli(project, "prepare", "--name", "builtin", "--script-file", str(script), "--duration", "10")
+        self.run_cli(project, "bind-generated-image", "--image-file", str(self.source), "--prompt-file", str(prompt), expect=1)
+        self.run_cli(project, "confirm-plan", "--approved-by", "user")
+        result = self.run_cli(project, "bind-generated-image", "--image-file", str(self.source), "--prompt-file", str(prompt))
+        self.assertIn('"provider": "codex_builtin_image"', result.stdout)
+        saved = json.loads((project / "project.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["state"]["stage"], "awaiting_image_confirmation")
+        self.assertEqual(saved["image_generation"]["provider"], "codex_builtin_image")
+        self.assertEqual(saved["canonical_reference"]["source"], "codex_builtin_image")
+        self.assertTrue((project / "assets" / "production" / "canonical.png").is_file())
+        self.assertEqual(ImageHandler.payloads, [])
 
 
 if __name__ == "__main__":

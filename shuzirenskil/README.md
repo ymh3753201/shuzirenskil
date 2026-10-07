@@ -1,6 +1,6 @@
 # shuzirenskil
 
-公开分享版：仓库只包含 Skill 代码和空白配置示例。每位使用者需要自行准备图片与视频服务商账号，并把自己的接口地址和密钥放在本机私密配置中。不要把填好的 `.env` 上传到 GitHub、飞书或聊天窗口。
+公开分享版：仓库只包含 Skill 代码和空白配置示例。视频服务商账号仍须使用者自己准备；使用 Codex 内置生图或已有图片时，无须配置第三方图片 API。不要把填好的 `.env` 上传到 GitHub、飞书或聊天窗口。
 
 2026-10-06 更新：新正常制作使用 3.0 角色声音设计，出图后核对，首段与最终检查声音匹配；新增包含真实末帧的无文字检查证据。详细步骤见 `references/voice-casting-and-text-review.md`。旧 2.0 项目不自动改合同或重生成。
 
@@ -13,21 +13,21 @@
 - FFmpeg 和 ffprobe
 - 需要自动字幕时：`whisper-cli` 和本地 Whisper 模型
 - 视频制作时：默认首选 91topgo，Key 放入 macOS 钥匙串服务 `shuzirenskil-91topgo-video` 或 `SHUZIRENSKIL_91TOPGO_API_KEY`；MikuAPI 仅显式降级，使用 `shuzirenskil-mikuapi-video` 或 `SHUZIRENSKIL_MIKUAPI_API_KEY`。旧的通用变量 `SHUZIRENSKIL_API_KEY` 不再被视频流程读取，避免把两家服务商的密钥混用。
-- 参考图固定走第三方中转站：配置 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`，模型固定为 `gpt-image-2`
+- 图片优先使用当前 Codex 会话可用的内置 `image_gen`；也可使用自备图片。只有选择第三方路线时才配置 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`，模型为 `gpt-image-2`
 
 不要把 API Key 写进 Skill 目录、项目记录、日志或打包文件。macOS 本机推荐使用钥匙串；临时开发 Key 才放在项目根目录私密 `.env`。
 
 ## 本地 `.env` 配置
 
 1. 把 `.env.example` 复制到具体制作项目目录，文件名改为 `.env`。
-2. 按服务商填写 `SHUZIRENSKIL_91TOPGO_API_KEY` 或 `SHUZIRENSKIL_MIKUAPI_API_KEY`，以及图片用的 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`。也可以只配置对应的 macOS 钥匙串。
+2. 按视频服务商填写 `SHUZIRENSKIL_91TOPGO_API_KEY` 或 `SHUZIRENSKIL_MIKUAPI_API_KEY`。仅在选择第三方生图时填写图片用的 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`。视频密钥也可以只配置到对应的 macOS 钥匙串。
 3. 在 macOS 或 Linux 执行 `chmod 600 <项目目录>/.env`。脚本发现其他用户也能读取时会拒绝使用。
 
 macOS 钥匙串保存示例（不要把真实 Key 写进文档）：`security add-generic-password -U -a "$USER" -s shuzirenskil-91topgo-video -w '<API_KEY>'`。
 
 也可以用全局参数 `--env-file <私密文件路径>` 指定位置。如果该文件没有当前视频服务商的专用变量，脚本会使用该服务商的钥匙串；文件中的旧通用变量不会覆盖它。`check-provider` 只做免费连通性检查，不创建付费视频任务；`submit` 创建任务前还会免费核对凭据与目标模型，并要求已完成两次确认和免费预检。
 
-本地生成的参考图不需要先上传到公共图床。`generate-image` 和 `bind-image` 默认使用 `--input-transport auto`：有公共 HTTPS 地址时直接使用，没有地址时自动把已确认的本地图片压缩成 JPEG Data URI，并在 91topgo 的 `reference_images` 中发送。只有明确选择 `--input-transport provider-file` 才会走旧的 Provider 文件上传流程。
+本地生成的参考图不需要先上传到公共图床。Codex 内置图片保存为本地文件后，运行 `bind-generated-image --image-file <图片> --prompt-file <已确认提示词>`；第三方图片走 `generate-image`；已有图片走 `bind-image`。绑定后的本地图片在 91topgo 请求前压缩为 JPEG Data URI。只有明确选择 `--input-transport provider-file` 才会走旧的 Provider 文件上传流程。
 
 91topgo 当前使用 `POST /v1/videos` 创建、`GET /v1/videos/{id}` 查询，时长字段为字符串 `seconds`。参考图使用 `reference_images`；本地生成图会压缩成不超过 800000 字节的 JPEG Data URI，直接放进视频请求，不依赖图片上传接口。已完成一次 1 秒纯文本链路验证，并复用带货视频 Skill 已验收的 91topgo 参考图合同。Provider 付费 POST 失败或状态不明时不会自动切换到 MikuAPI；需要在提交前显式选择 `--provider mikuapi`。
 
@@ -49,7 +49,7 @@ macOS 钥匙串保存示例（不要把真实 Key 写进文档）：`security ad
 ## 能力状态
 
 - 本地分段、预检、模拟接口、拼接和质检：可通过免费测试验证。
-- 图片：固定使用第三方 `gpt-image-2` 兼容中转站，不依赖内置 Image2；本项目此前的真实生成已通过。
+- 图片：当前 Codex 会话有内置 `image_gen` 时可直接生图并绑定，无须第三方图片 API Key；第三方 `gpt-image-2` 仍可作为明确选定的路线。账号登录本身不证明工具可用或有免费额度。
 - 91topgo Grok 中转站：除此前 1 秒纯文本和参考图合同验证外，2026-10-05 本项目已完成两次 15 秒、720p、9:16 的人物参考图口播请求，均成功下载 24fps 原片。这证明该组合可运行，不证明人物自然度、长句逐字准确或跨段声音已经达到交付标准；本次人物偏僵硬正是优化依据。
 - 剪辑：生成片段在拼接前会自动裁掉过长的尾部静音，质检会再次阻止尾部静音超限的成片交付。
 - 帧率和速度：拼接保留原片帧率，不自动把 24fps 补为 30fps，也不通过整体缓速凑精确时长。新生成视频的最终质检必须检查动作、手势时机、口型和声音自然度。

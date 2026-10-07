@@ -27,7 +27,7 @@
 
 ## 2. 出图后核对，沿用原有第二次确认
 
-1. `generate-image` 或 `bind-image` 完成后，读取 `project.json` 中的主图和所有生产参考图，实际查看。
+1. `bind-generated-image`、`generate-image` 或 `bind-image` 完成后，读取 `project.json` 中的主图和所有生产参考图，实际查看。
 2. 从 `assets/character-review-template.json` 建立观察文件，填入当前 `canonical_sha256`、`image_set_digest`、`voice_signature`。分别记录可见事实、声音选角匹配理由、所有参考图无文字检查。
 3. 仅在实际匹配且参考图干净时将 `casting_fit` 和 `reference_text_free` 设为 `pass`。
 4. 执行：

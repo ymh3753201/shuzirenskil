@@ -13,11 +13,11 @@
 
 完整文字方案已经出现在用户可见的主回复后，用户确认方案。方案必须锁定生成模式、参考图职责、输入传输方式、预设声音和视频提示词版本。运行 `confirm-plan` 记录方案摘要，但不要读取 API Key 或创建付费任务。
 
-## 3. 第三方 gpt-image-2 和第二次确认
+## 3. 生产图片和第二次确认
 
-方案确认后，不再询问是否生图，直接运行 `generate-image` 调用第三方 `gpt-image-2`。该命令会裁成视频画幅并自动绑定主参考图。多段视频同时传入 `assets/continuity-template.json` 格式的一致性说明。
+方案确认后使用已选图片路线：内置 `image_gen` 生成后把选中的真实文件保存到项目目录，再运行 `bind-generated-image --image-file <图片> --prompt-file <已确认提示词>`；自备图片运行 `bind-image`；只有选定第三方路线时运行 `generate-image` 调用 `gpt-image-2`。这两条生成图片路线都会裁成视频画幅并绑定主参考图。多段视频同时传入 `assets/continuity-template.json` 格式的一致性说明。内置工具不可用时不得静默切换到收费接口。
 
-`image-to-video` 多段提示词人声默认只绑定一张主参考图，每段复用同一图片指纹和同一 HTTPS 地址。只有用户明确接受人物与音色漂移风险时，才可加 `--allow-derived-segment-images-with-risk` 绑定每段同源首帧。`reference-to-video` 绑定 1-7 张参考图，并按顺序为每张图声明唯一职责。实际查看所有会进入请求的图片，填写 `character-review-template.json` 中的观察和当前图片、声音指纹，运行 `review-character`。向用户展示图片及已选声音的简明说明，再等待原定第二次确认。用户明确确认图片并开始制作后，运行 `authorize`，并把该回复同时视为已接受方案中披露的上传、声音和动作风险；不要再发起第三次确认。
+`image-to-video` 多段提示词人声默认只绑定一张主参考图，每段复用同一图片指纹和同一输入来源。只有用户明确接受人物与音色漂移风险时，才可加 `--allow-derived-segment-images-with-risk` 绑定每段同源首帧。`reference-to-video` 绑定 1-7 张参考图，并按顺序为每张图声明唯一职责。实际查看所有会进入请求的图片，填写 `character-review-template.json` 中的观察和当前图片、声音指纹，运行 `review-character`。向用户展示图片及已选声音的简明说明，再等待原定第二次确认。用户明确确认图片并开始制作后，运行 `authorize`，并把该回复同时视为已接受方案中披露的上传、声音和动作风险；不要再发起第三次确认。
 
 当前方案不得选择 `provider-file`：2026-08-24 的真实测试确认 MikuAPI `/v1/files` 返回 HTTP 404。用户自己的音频只用于内容和声音风格分析；默认把声音要求写入提示词，由模型生成口播人声。`upload-inputs` 代码保留用于未来兼容，但配置会直接停止。
 
