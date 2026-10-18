@@ -1,0 +1,41 @@
+{
+  "ad_review": {
+    "ad_contract_digest": "用 _common.digest_json 对当前 ad_contract 计算",
+    "image_set_digest": "从当前 project.json 复制",
+    "reviewer": "agent_visual",
+    "video_sha256": null,
+    "normal_speed_full_playback": false,
+    "same_space": {
+      "status": "pending",
+      "observations": ""
+    },
+    "no_static_collage": {
+      "status": "pending",
+      "observations": ""
+    },
+    "reference_fidelity": {
+      "status": "pending",
+      "observations": ""
+    },
+    "composition": {
+      "status": "pending",
+      "observations": ""
+    },
+    "source_text_fidelity": {
+      "status": "pending",
+      "observations": ""
+    },
+    "scene_motion": {
+      "status": "pending",
+      "observations": ""
+    },
+    "product_or_service_truth": {
+      "status": "pending",
+      "observations": ""
+    },
+    "cta_consistency": {
+      "status": "pending",
+      "observations": ""
+    }
+  }
+}

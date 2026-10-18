@@ -347,6 +347,8 @@ class GuardedApiTests(unittest.TestCase):
             "normal_speed_playback": "按正常速度完整播放视频并听完音轨。",
             "spoken_words": "这不是原来的口播。",
         }
+        for key in ("no_generated_text", "motion_naturalness", "gesture_phrase_fit", "lip_sync", "voice_naturalness", "speech_pacing", "script_complete", "identity_consistency", "normal_speed_playback"):
+            evidence_data[key] = {"status": "pass", "observations": evidence_data[key]}
         evidence.write_text(json.dumps(evidence_data, ensure_ascii=False), encoding="utf-8")
         blocked = self.run_cli(project, "review-pilot", "--evidence-file", str(evidence), expect=1)
         self.assertIn("不完全一致", blocked.stderr)
@@ -358,6 +360,14 @@ class GuardedApiTests(unittest.TestCase):
         self.assertEqual(FakeHandler.post_count, 1)
         inspection = json.loads(self.run_cli(project, "inspect-visuals", "--video", str(pilot_clip), "--output-dir", str(project / "pilot-visuals")).stdout)
         evidence_data["text_review"] = {"manifest_file": inspection["manifest_file"], "manifest_sha256": inspection["manifest_sha256"], "reviewer": "agent_visual", "full_video_viewed": True, "all_sampled_frames_viewed": True, "last_frame_viewed": True, "text_present": False, "observations": "纯色合成测试视频，模拟检查首尾及全程画面。"}
+        original_lip_check = evidence_data["lip_sync"]
+        for rejected in ("FAIL：本项明确未通过，必须停止后续付费生成。", {"status": "fail", "observations": "口型与音频不同步，不能继续生成。"}, {"status": "pending", "observations": "尚未检查完毕，不能继续生成。"}):
+            evidence_data["lip_sync"] = rejected
+            evidence.write_text(json.dumps(evidence_data, ensure_ascii=False), encoding="utf-8")
+            self.run_cli(project, "review-pilot", "--evidence-file", str(evidence), expect=1)
+            self.run_cli(project, "submit", "--timeout", "3", api_key=True, expect=1)
+            self.assertEqual(FakeHandler.post_count, 1)
+        evidence_data["lip_sync"] = original_lip_check
         evidence.write_text(json.dumps(evidence_data, ensure_ascii=False), encoding="utf-8")
         self.run_cli(project, "review-pilot", "--evidence-file", str(evidence))
         pilot_report_path = project / "pilot-review.json"
@@ -366,7 +376,19 @@ class GuardedApiTests(unittest.TestCase):
         pilot_report_path.write_text(json.dumps(forged_report), encoding="utf-8")
         self.run_cli(project, "submit", "--timeout", "3", api_key=True, expect=1)
         self.assertEqual(FakeHandler.post_count, 1)
+        changed_check = json.loads(json.dumps(pilot_report))
+        changed_check["evidence"]["lip_sync"]["status"] = "fail"
+        pilot_report_path.write_text(json.dumps(changed_check), encoding="utf-8")
+        self.run_cli(project, "submit", "--timeout", "3", api_key=True, expect=1)
+        self.assertEqual(FakeHandler.post_count, 1)
         pilot_report_path.write_text(json.dumps(pilot_report), encoding="utf-8")
+        legacy_report = json.loads(json.dumps(pilot_report))
+        legacy_report["evidence"]["lip_sync"] = legacy_report["evidence"]["lip_sync"]["observations"]
+        pilot_report_path.write_text(json.dumps(legacy_report), encoding="utf-8")
+        self.run_cli(project, "submit", "--timeout", "3", api_key=True, expect=1)
+        self.run_cli(project, "review-pilot", "--evidence-file", str(evidence))
+        self.assertTrue(list((project / "review-history").glob("pilot-review-*.json")))
+        self.assertEqual(FakeHandler.post_count, 1)
         self.run_cli(project, "submit", "--timeout", "3", api_key=True)
         self.assertEqual(FakeHandler.post_count, count)
 

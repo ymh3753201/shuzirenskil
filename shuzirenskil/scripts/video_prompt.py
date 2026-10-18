@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 from typing import Any
+from ad_contract import validate_ad_contract, render_ad_prompt
 
 
 PROMPT_SPEC_VERSION = "3.0"
@@ -67,12 +68,14 @@ def default_prompt_spec() -> dict[str, Any]:
 def validate_prompt_spec(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("视频提示词方案必须是 JSON 对象")
-    if value.get("schema_version") not in {"2.0", PROMPT_SPEC_VERSION}:
-        raise ValueError(f"视频提示词方案 schema_version 必须是 2.0 或 {PROMPT_SPEC_VERSION}")
+    if value.get("schema_version") not in {"2.0", "3.1", PROMPT_SPEC_VERSION}:
+        raise ValueError(f"视频提示词方案 schema_version 必须是 2.0、3.0 或 3.1")
     result = default_prompt_spec()
     result["schema_version"] = value["schema_version"]
     if value["schema_version"] == "2.0":
         del result["voice_casting"]
+    if value["schema_version"] == "3.1":
+        result["ad_contract"] = validate_ad_contract(value.get("ad_contract"))
     unknown_fields = sorted(set(value) - set(result))
     if unknown_fields:
         raise ValueError("视频提示词方案存在未知字段: " + ", ".join(unknown_fields))
@@ -98,15 +101,19 @@ def validate_prompt_spec(value: dict[str, Any]) -> dict[str, Any]:
         result["speech_rate_cpm"] = rate
     if "performance_beats" in value:
         beats = value["performance_beats"]
-        if not isinstance(beats, list) or len(beats) > 24:
-            raise ValueError("performance_beats 必须是最多 24 项的数组")
+        if not isinstance(beats, list) or len(beats) > 10000:
+            raise ValueError("performance_beats 必须是最多 10000 项的数组；每段最多 24 项")
         cleaned_beats = []
+        per_segment_counts: dict[int, int] = {}
         for beat in beats:
             required = {"segment_index", "trigger_phrase", "expression"}
             if not isinstance(beat, dict) or not required.issubset(beat) or set(beat) - (required | {"gesture"}):
                 raise ValueError("每个表演节拍必须包含 segment_index、trigger_phrase、expression；gesture 可选")
             if isinstance(beat["segment_index"], bool) or not isinstance(beat["segment_index"], int) or beat["segment_index"] < 1:
                 raise ValueError("表演节拍 segment_index 必须是正整数")
+            per_segment_counts[beat["segment_index"]] = per_segment_counts.get(beat["segment_index"], 0) + 1
+            if per_segment_counts[beat["segment_index"]] > 24:
+                raise ValueError("每段 performance_beats 最多 24 项，请简化这一段的表演设计")
             if any(not isinstance(beat[key], str) or not beat[key].strip() or len(beat[key]) > 100 for key in required - {"segment_index"}):
                 raise ValueError("表演节拍的台词触发词和表情必须是 1-100 字文本")
             gesture = beat.get("gesture")
@@ -172,8 +179,8 @@ def voice_signature(prompt_spec: dict[str, Any]) -> str:
 
 def require_voice_casting(spec: dict[str, Any]) -> None:
     spec = validate_prompt_spec(spec)
-    if spec["schema_version"] != "3.0" or not spec.get("voice_casting"):
-        raise ValueError("新制作必须使用 3.0 方案并设计 voice_casting；不能直接沿用默认男女声音")
+    if spec["schema_version"] not in {"3.0", "3.1"} or not spec.get("voice_casting"):
+        raise ValueError("新制作必须使用 3.0 或 3.1 方案并设计 voice_casting；不能直接沿用默认男女声音")
     default = default_prompt_spec()["voice_profile"]
     if spec["voice_profile"]["pitch"] == default["pitch"] and spec["voice_profile"]["timbre"] == default["timbre"]:
         raise ValueError("请针对角色设计 voice_profile 的音高和音色，不能原样使用默认配音模板")
@@ -295,8 +302,18 @@ def build_video_prompt(
         ) + "。")
     if "unspoken_budget_seconds" in segment:
         parts.append(f"口播节奏：计划语速约每分钟 {spec['speech_rate_cpm']} 个汉字，按完整语义连贯讲述；手势跟随说话，不为动作等候或为填满画面拖长停顿。句尾正常收声。")
-    parts.append("强制限制：" + "；".join(spec["negative_constraints"]) + "。")
-    if spec["schema_version"] == "3.0":
+    ad = spec.get("ad_contract")
+    negatives = spec["negative_constraints"]
+    if ad:
+        parts.append(render_ad_prompt(ad, generation_mode, roles, reference_image_index_base))
+        if ad["source_text"]:
+            # Only replace the exact legacy default; reject other blanket bans instead of silently rewriting intent.
+            old = default_prompt_spec()["negative_constraints"][1]
+            negatives = ["不得添加参考图白名单之外的文字或标识" if x == old else x for x in negatives]
+            if any(re.search(r"(?:禁止|不得|不出现|没有|无).{0,8}(?:任何文字|所有文字|文字、|文字，|Logo)", x) for x in negatives):
+                raise ValueError("广告允许原生招牌时，negative_constraints 不能同时全面禁止文字或 Logo")
+    parts.append("强制限制：" + "；".join(negatives) + "。")
+    if spec["schema_version"] in {"3.0", "3.1"} and not (ad and ad["source_text"]):
         parts.append("无文字画面合同：" + NO_TEXT_RULE)
     prompt = "\n".join(parts)
     if len(prompt) > MAX_PROMPT_CHARS:

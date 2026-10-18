@@ -41,13 +41,15 @@ from media import (  # noqa: E402
     srt_timestamp,
     stitch,
     technical_summary,
+    validate_full_decode,
     validate_reference_image,
 )
 from image_provider import ImageProviderError, generate_image  # noqa: E402
 from image_transport import ImageTransportError, local_image_data_uri  # noqa: E402
-from planner import plan_segments, require_ready_timing, split_sentences  # noqa: E402
+from planner import ends_complete_sentence, plan_segments, require_ready_timing, split_sentences  # noqa: E402
 from private_env import load_private_value  # noqa: E402
-from quality_contract import validate_character_review, validate_text_review  # noqa: E402
+from ad_contract import AD_KINDS, validate_ad_review
+from quality_contract import validate_character_review, validate_text_review, validate_pilot_checks  # noqa: E402
 from provider import ProviderError, create_task, download_content, download_video_url, extract_video_url, get_status, list_model_ids, probe_endpoint, upload_file  # noqa: E402
 from video_prompt import (  # noqa: E402
     build_video_prompt,
@@ -211,7 +213,21 @@ def command_prepare(args: argparse.Namespace) -> None:
         inputs["video_prompt_spec"] = _copy_input(prompt_spec_source, project_dir / "inputs" / "video-prompt-spec.json")
     else:
         prompt_spec = default_prompt_spec()
+    purpose = getattr(args, "purpose", "narration")
+    ad = prompt_spec.get("ad_contract")
+    if purpose in AD_KINDS or ad:
+        if not ad or purpose != ad["kind"]:
+            raise ValueError("广告必须使用 3.1 ad_contract，并以 --purpose 指定一致的广告类型")
+        if route == "video_generation" and (args.allow_legacy_performance_plan or args.no_pilot_first or args.duration_capability_test):
+            raise ValueError("广告制作不能通过旧方案、跳过首段或时长测试开关绕过检查")
     preset_voices = [item.strip().lower() for item in (args.preset_voice or [])]
+    voice_mode = getattr(args, "voice_mode", None) or ("preset_voice" if preset_voices else "model_generated")
+    if voice_mode == "model_generated" and preset_voices:
+        raise ValueError("model_generated 不发送声音参考，请移除 --preset-voice 或明确选择 preset_voice")
+    if voice_mode == "preset_voice" and not preset_voices:
+        raise ValueError("preset_voice 必须指定 --preset-voice，且仍受供应商实际能力检查")
+    if voice_mode in {"reference_timbre", "locked_audio"}:
+        raise ValueError("现有 Grok 网关执行器未开放此声音路线；请先使用 production_plan.py 生成多模型/严格音频计划，不能降级成自由配音")
     if len(preset_voices) > 3 or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item) for item in preset_voices):
         raise ValueError("预设声音最多 3 个，voice_id 只能包含字母、数字、下划线或短横线")
     if preset_voices and args.generation_mode != "reference-to-video":
@@ -265,6 +281,7 @@ def command_prepare(args: argparse.Namespace) -> None:
         "updated_at": now_iso(),
         "route": route,
         "settings": {
+            "purpose": purpose,
             "language": args.language,
             "aspect_ratio": args.aspect_ratio,
             "resolution": args.resolution,
@@ -274,6 +291,7 @@ def command_prepare(args: argparse.Namespace) -> None:
             "generation_mode": args.generation_mode,
             "preset_voices": preset_voices,
             "voice_strategy": "preset_voice_reference" if preset_voices else "prompt_generated_voice",
+            "voice_mode": voice_mode,
             "voice_signature": voice_signature(prompt_spec),
             "voice_identity_signature": voice_identity_signature(prompt_spec),
             "character_review_required": route == "video_generation" and not args.allow_legacy_performance_plan,
@@ -1017,7 +1035,7 @@ def command_preflight(args: argparse.Namespace) -> None:
             seconds = segment["request_seconds"]
             if seconds not in config["allowed_duration_seconds"]:
                 raise ValueError(f"片段 {segment['index']} 秒数不在临时允许范围")
-            if not segment["script"].endswith(tuple("。！？!?")):
+            if not ends_complete_sentence(segment["script"]):
                 raise ValueError(f"片段 {segment['index']} 没有在完整句子结束")
             if provider_id != "91topgo" and config.get("supports_image_to_video") is False and generation_mode == "image-to-video":
                 raise ValueError(
@@ -1351,6 +1369,7 @@ def command_submit(args: argparse.Namespace) -> None:
         if not project["state"].get("pilot_review_passed") or not pilot_path.is_file():
             raise ValueError("首段尚未通过自然度和口播检查，后续片段不能付费提交")
         pilot = read_json(pilot_path)
+        validate_pilot_checks(pilot.get("evidence", {}), project)
         first_job = read_json(args.project_dir / "jobs.json")["jobs"][0]
         if (pilot.get("status") != "pass" or pilot.get("project_id") != project["project_id"]
                 or pilot.get("contract_digest") != project.get("contract_digest")
@@ -1358,7 +1377,8 @@ def command_submit(args: argparse.Namespace) -> None:
                 or pilot.get("clip_sha256") != sha256_file(Path(first_job["clip_path"]))):
             raise ValueError("首段试片验收记录与当前项目或视频不匹配，后续付费提交已停止")
         if pilot.get("evidence", {}).get("text_review") or project["settings"].get("character_review_required"):
-            validate_text_review(pilot.get("evidence", {}), Path(first_job["clip_path"]))
+            validate_text_review(pilot.get("evidence", {}), Path(first_job["clip_path"]), project)
+        validate_ad_review(project, pilot.get("evidence", {}), video=Path(first_job["clip_path"]))
     config = read_json(args.project_dir / "model-snapshot.json")
     _require_snapshot_provider(config, getattr(args, "provider", None))
     _verify_plan_digest(project)
@@ -1499,7 +1519,7 @@ def command_poll(args: argparse.Namespace) -> None:
 
 def command_review_pilot(args: argparse.Namespace) -> None:
     project = load_project(args.project_dir)
-    if project["route"] != "video_generation" or project["state"]["stage"] != "pilot_review_pending":
+    if project["route"] != "video_generation" or project["state"]["stage"] not in {"pilot_review_pending", "production_started"}:
         raise ValueError("当前项目没有待检查的首段试片")
     jobs = read_json(args.project_dir / "jobs.json")["jobs"]
     first = jobs[0]
@@ -1513,13 +1533,7 @@ def command_review_pilot(args: argparse.Namespace) -> None:
     clip_sha256 = sha256_file(clip)
     if evidence.get("reviewed_clip_sha256") != clip_sha256:
         raise ValueError("首段质检证据未绑定当前试片指纹，请对实际视频重新检查")
-    required = ("motion_naturalness", "gesture_phrase_fit", "lip_sync", "voice_naturalness", "speech_pacing", "script_complete", "identity_consistency", "normal_speed_playback")
-    required += ("no_generated_text",)
-    if project["settings"].get("character_review_required"):
-        required += ("voice_casting_match",)
-    for key in required:
-        if not isinstance(evidence.get(key), str) or len(evidence[key].strip()) < 8:
-            raise ValueError(f"首段质检 {key} 必须记录至少 8 字的真实观察依据")
+    validate_pilot_checks(evidence, project)
     spoken = evidence.get("spoken_words")
     if not isinstance(spoken, str) or not spoken.strip():
         raise ValueError("首段质检必须提供实际听到的 spoken_words")
@@ -1527,9 +1541,16 @@ def command_review_pilot(args: argparse.Namespace) -> None:
     similarity = difflib.SequenceMatcher(None, expected, _normalized_speech_text(spoken)).ratio()
     if _normalized_speech_text(spoken) != expected:
         raise ValueError(f"首段实际听写与确认稿不完全一致（相似度 {similarity:.0%}），禁止提交后续片段")
-    validate_text_review(evidence, clip)
+    validate_text_review(evidence, clip, project)
+    validate_ad_review(project, evidence, video=clip)
     report = {"status": "pass", "project_id": project["project_id"], "contract_digest": project["contract_digest"], "task_id": first["task_id"], "clip_sha256": clip_sha256, "voice_signature": project["settings"]["voice_signature"], "summary": summary, "speech_similarity": round(similarity, 4), "evidence": evidence, "reviewed_at": now_iso()}
-    atomic_write_json(args.project_dir / "pilot-review.json", report)
+    previous_report = args.project_dir / "pilot-review.json"
+    if previous_report.is_file():
+        history = args.project_dir / "review-history" / f"pilot-review-{sha256_file(previous_report)}.json"
+        history.parent.mkdir(parents=True, exist_ok=True)
+        if not history.exists():
+            shutil.copy2(previous_report, history)
+    atomic_write_json(previous_report, report)
     project["state"]["pilot_review_passed"] = True
     project["state"]["stage"] = "production_started"
     save_project(args.project_dir, project)
@@ -1553,8 +1574,12 @@ def command_stitch(args: argparse.Namespace) -> None:
             raise ValueError("并非所有片段都已下载")
         clips = [Path(job["clip_path"]) for job in jobs["jobs"]]
         report = stitch(clips, output, args.project_dir / "work" / "stitch", project["settings"]["aspect_ratio"])
+    report["duration_checks"] = _duration_review_checks(report["output"]["duration_seconds"], project["plan"], project["route"])
+    report["candidate_sha256"] = sha256_file(output)
+    report["quality_status"] = "awaiting_full_review" if all(report["duration_checks"].values()) else "duration_failed_manual_review_pending"
     atomic_write_json(args.project_dir / "stitch-report.json", report)
     project["state"]["stage"] = "clean_candidate_ready"
+    project["state"]["quality_status"] = report["quality_status"]
     save_project(args.project_dir, project)
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
@@ -1594,6 +1619,12 @@ def _normalized_speech_text(text: str) -> str:
     return re.sub(r"[\W_]+", "", text, flags=re.UNICODE).lower()
 
 
+def _review_contract_digest(project: dict[str, Any]) -> str:
+    return digest_json({key: project.get(key) for key in (
+        "project_id", "route", "script", "plan", "settings", "contract_digest", "video_prompt_spec",
+    )})
+
+
 def _load_review_evidence(kind: str, args: argparse.Namespace, checks: dict[str, str]) -> tuple[dict[str, Any], Path, float | None]:
     evidence_path = require_file(args.evidence_file, "质检证据")
     evidence = read_json(evidence_path)
@@ -1608,8 +1639,8 @@ def _load_review_evidence(kind: str, args: argparse.Namespace, checks: dict[str,
     confirmed = _normalized_speech_text(project.get("script", ""))
     heard = _normalized_speech_text(transcript_text)
     similarity = round(difflib.SequenceMatcher(None, confirmed, heard).ratio(), 4) if confirmed else None
-    if confirmed and similarity < 0.55:
-        raise ValueError(f"最终语音与确认稿相似度仅 {similarity:.0%}，不能标记语音完整")
+    if confirmed and confirmed != heard:
+        raise ValueError(f"实际听写与确认稿不一致（相似度 {similarity:.1%} 仅供诊断）。须实听核对错字、漏句、数字和专名；不能直接复制确认稿或仅按相似度放行")
     return evidence, transcript, similarity
 
 
@@ -1632,6 +1663,7 @@ def command_review(args: argparse.Namespace) -> None:
     candidate = args.project_dir / "outputs" / ("final.clean.mp4" if args.kind == "clean" else "final.subtitled.mp4")
     require_file(candidate, "待检查视频")
     summary = technical_summary(candidate)
+    validate_full_decode(candidate)
     expected_ratio = 9 / 16 if project["settings"]["aspect_ratio"] == "9:16" else 16 / 9
     actual_ratio = summary["width"] / summary["height"] if summary["width"] and summary["height"] else 0
     resolution_matches = (
@@ -1643,7 +1675,8 @@ def command_review(args: argparse.Namespace) -> None:
     evidence, transcript, speech_similarity = _load_review_evidence(args.kind, args, manual)
     inspected_visuals = None
     if args.kind == "clean" and manual.get("no_generated_text") == "pass":
-        inspected_visuals = validate_text_review(evidence, candidate)
+        inspected_visuals = validate_text_review(evidence, candidate, project)
+    validate_ad_review(project, evidence, video=candidate)
     tail_silence = detect_tail_silence(candidate)
     pacing_analysis = analyze_speech_pacing(candidate, project.get("script", ""), int(project["plan"].get("speech_rate_cpm") or 260)) if args.kind == "clean" and project["route"] == "video_generation" else None
     transcript_end_gap: float | None = None
@@ -1660,7 +1693,8 @@ def command_review(args: argparse.Namespace) -> None:
         "resolution_matches": resolution_matches,
         **_duration_review_checks(summary["duration_seconds"], project["plan"], project["route"]),
         "speech_transcript_present": transcript.stat().st_size > 0,
-        "speech_matches_confirmed_script": speech_similarity is None or speech_similarity >= 0.55,
+        "speech_matches_confirmed_script": True,  # _load_review_evidence enforces exact normalized equality.
+        "full_audio_video_decode": True,
         "has_effective_speech": float(tail_silence["tail_silence_seconds"]) < max(0.1, summary["duration_seconds"] - 0.2),
         "tail_silence_within_0_6_seconds": float(tail_silence["tail_silence_seconds"]) <= 0.6,
         "transcript_end_near_video_end": transcript_end_gap is None or transcript_end_gap <= 0.8,
@@ -1683,6 +1717,8 @@ def command_review(args: argparse.Namespace) -> None:
     report = {
         "schema_version": "1.0",
         "kind": args.kind,
+        "review_policy_version": "2.0-exact-transcript-full-decode",
+        "review_contract_digest": _review_contract_digest(project),
         "candidate": summary,
         "candidate_sha256": sha256_file(candidate),
         "automatic_checks": automatic,
@@ -1703,6 +1739,7 @@ def command_review(args: argparse.Namespace) -> None:
     atomic_write_json(args.project_dir / f"{args.kind}-review.json", report)
     if passed:
         project["state"]["stage"] = "clean_review_passed" if args.kind == "clean" else "captioned_review_passed"
+        project["state"]["quality_status"] = "review_passed"
         save_project(args.project_dir, project)
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
@@ -1807,6 +1844,8 @@ def command_finalize(args: argparse.Namespace) -> None:
     review = read_json(args.project_dir / f"{review_kind}-review.json")
     if review.get("status") != "pass":
         raise ValueError("最终候选视频尚未通过全部检查")
+    if review.get("review_policy_version") != "2.0-exact-transcript-full-decode" or review.get("review_contract_digest") != _review_contract_digest(project):
+        raise ValueError("旧版检查或确认稿/时长/设置已变化，须对已有视频重新检查；不需要重新生成")
     if project["route"] == "video_generation":
         jobs = read_json(args.project_dir / "jobs.json")
         if any(job.get("submission_attempts", 0) > 1 for job in jobs["jobs"]):
@@ -1827,6 +1866,8 @@ def command_finalize(args: argparse.Namespace) -> None:
         clean_candidate = args.project_dir / "outputs" / "final.clean.mp4"
         if clean_review.get("status") != "pass" or sha256_file(clean_candidate) != clean_review.get("candidate_sha256"):
             raise ValueError("字幕项目的干净视频检查记录已失效")
+        if clean_review.get("review_policy_version") != "2.0-exact-transcript-full-decode" or clean_review.get("review_contract_digest") != _review_contract_digest(project):
+            raise ValueError("干净版检查版本或合同已失效，须重新检查")
     else:
         clean_review = review
         clean_candidate = candidate
@@ -1836,7 +1877,10 @@ def command_finalize(args: argparse.Namespace) -> None:
         raise ValueError("干净版检查证据在审核后发生变化")
     clean_evidence = read_json(clean_observations)
     if clean_evidence.get("text_review") or project["settings"].get("character_review_required"):
-        validate_text_review(clean_evidence, clean_candidate)
+        validate_text_review(clean_evidence, clean_candidate, project)
+    validate_ad_review(project, clean_evidence, video=clean_candidate)
+    if review_kind == "captioned":
+        validate_ad_review(project, read_json(Path(review["evidence_snapshot"]["path"])), video=candidate)
     delivery = {
         "schema_version": "1.0",
         "status": "pass",
@@ -1850,8 +1894,8 @@ def command_finalize(args: argparse.Namespace) -> None:
         "provider_runtime_paid_verified": bool(read_json(args.project_dir / "model-snapshot.json").get("runtime_paid_verified")),
         "provider_runtime_paid_verification_scope": read_json(args.project_dir / "model-snapshot.json").get("runtime_paid_verified_scope"),
         "remaining_unverified": [
-            "MikuAPI 已验证 4 秒常规短片和 1 秒提示词人声短片；长句、长视频连续性和 720p/1080p 仍未验证",
-            "用户原音色复刻、长句口播准确率和跨段声音一致性",
+            "当前项目验收只针对本次视频，不代表其他供应商、模型、分辨率或声音模式已验证",
+            "其他项目的原音色相似度、口播准确率及跨段人物与声音一致性须分别验收",
         ],
         "finalized_at": now_iso(),
     }
@@ -1890,6 +1934,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--name", required=True)
+    prepare.add_argument("--purpose", choices=["narration", *AD_KINDS], default="narration", help="门店/产品/公司广告必须声明用途并提交 3.1 创意合同")
     prepare.add_argument("--script-file", type=Path)
     prepare.add_argument("--existing-video", type=Path)
     prepare.add_argument("--subtitle-source", type=Path)
@@ -1909,6 +1954,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--allow-legacy-performance-plan", action="store_true", help="仅用于迁移旧流程；新数字人口播默认要求每段真实台词表演节拍")
     prepare.add_argument("--no-pilot-first", action="store_true", help="仅供兼容旧流程；多段新项目默认先检查首段试片")
     prepare.add_argument("--preset-voice", action="append", help="最多 3 个 xAI 预设 voice_id；MikuAPI 透传验收前不会进入付费预检")
+    prepare.add_argument("--voice-mode", choices=["model_generated", "preset_voice", "reference_timbre", "locked_audio"], help="显式选择声音；现有网关只执行已验证范围，参考音色/严格音轨请先使用多模型规划入口")
     prepare.add_argument(
         "--duration-capability-test",
         action="store_true",

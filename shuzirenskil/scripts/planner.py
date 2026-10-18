@@ -10,6 +10,13 @@ from functools import lru_cache
 STRONG_SENTENCE_RE = re.compile(r"[^。！？!?]+[。！？!?]+|[^。！？!?]+$")
 CJK_RE = re.compile(r"[\u3400-\u9fff]")
 LATIN_WORD_RE = re.compile(r"[A-Za-z0-9]+(?:[-_.][A-Za-z0-9]+)*")
+CYRILLIC_WORD_RE = re.compile(r"[А-Яа-яЁё]+(?:[-'][А-Яа-яЁё]+)*")
+RUSSIAN_SENTENCE_RE = re.compile(r"[^。！？!?.]+[。！？!?.]+|[^。！？!?.]+$")
+
+
+def ends_complete_sentence(text: str) -> bool:
+    endings = r"[。！？!?.]$" if CYRILLIC_WORD_RE.search(text) else r"[。！？!?]$"
+    return bool(re.search(endings, text))
 MIN_EXACT_SPEECH_FILL = 0.86  # Legacy v1 warning only; v2 evaluates unused seconds.
 
 
@@ -26,7 +33,7 @@ class PlannedSegment:
             "script": self.script,
             "estimated_speech_seconds": self.estimated_speech_seconds,
             "request_seconds": self.request_seconds,
-            "ends_on_complete_sentence": bool(re.search(r"[。！？!?]$", self.script)),
+            "ends_on_complete_sentence": ends_complete_sentence(self.script),
         }
 
 
@@ -36,16 +43,21 @@ def normalize_script(text: str) -> str:
 
 def split_sentences(text: str) -> list[str]:
     normalized = normalize_script(text)
-    return [match.group(0).strip() for match in STRONG_SENTENCE_RE.finditer(normalized) if match.group(0).strip()]
+    pattern = RUSSIAN_SENTENCE_RE if CYRILLIC_WORD_RE.search(normalized) else STRONG_SENTENCE_RE
+    return [match.group(0).strip() for match in pattern.finditer(normalized) if match.group(0).strip()]
 
 
 def estimate_speech_seconds(text: str, speech_rate_cpm: int = 260) -> float:
     cjk_count = len(CJK_RE.findall(text))
     latin_words = len(LATIN_WORD_RE.findall(text))
+    russian_words = len(CYRILLIC_WORD_RE.findall(text))
     punctuation_pause = len(re.findall(r"[，,；;：:。！？!?]", text)) * 0.14
+    if russian_words:
+        punctuation_pause += text.count(".") * 0.14
     if not 180 <= speech_rate_cpm <= 320:
         raise ValueError("口播语速必须在每分钟 180-320 个汉字之间")
-    return round(cjk_count * 60 / speech_rate_cpm + latin_words / 2.8 + punctuation_pause, 2)
+    # Russian planning heuristic: 145 words/minute; actual generated speech must be heard.
+    return round(cjk_count * 60 / speech_rate_cpm + latin_words / 2.8 + russian_words * 60 / 145 + punctuation_pause, 2)
 
 
 def pack_sentences_minimally(sentences: list[str], durations: list[float], max_speech_seconds: float) -> tuple[list[list[str]], list[float]]:
@@ -143,7 +155,7 @@ def _plan_segments_v1(
     sentences = split_sentences(script)
     if not sentences:
         raise ValueError("口播稿为空")
-    if not re.search(r"[。！？!?]$", sentences[-1]):
+    if not ends_complete_sentence(sentences[-1]):
         raise ValueError("口播稿最后一句缺少完整句子结束标点")
 
     if duration_mode not in {"auto", "exact", "content-fit"}:
@@ -305,7 +317,7 @@ def plan_segments(
     sentences = split_sentences(script)
     if not sentences:
         raise ValueError("口播稿为空")
-    if not re.search(r"[。！？!?]$", sentences[-1]):
+    if not ends_complete_sentence(sentences[-1]):
         raise ValueError("口播稿最后一句缺少完整句子结束标点")
     durations = [estimate_speech_seconds(sentence, speech_rate_cpm) for sentence in sentences]
     if any(duration > max_request_seconds - SPEECH_MARGIN_SECONDS for duration in durations):
@@ -323,7 +335,8 @@ def plan_segments(
     issues = []
     for index, (start, end, seconds) in enumerate(groups, 1):
         speech = round(sum(durations[start:end]), 2)
-        segment = PlannedSegment(index, "".join(sentences[start:end]), speech, seconds).as_dict()
+        joiner = " " if CYRILLIC_WORD_RE.search(script) else ""
+        segment = PlannedSegment(index, joiner.join(sentences[start:end]), speech, seconds).as_dict()
         unused = round(seconds - speech, 2)
         # A planning heuristic, allowing short utterances' fixed start/end margin.
         limit = round(max(1.5, seconds * 0.15), 2)
@@ -341,7 +354,7 @@ def plan_segments(
         "delivery_max_seconds": delivery_max_seconds if delivery_max_seconds is not None else requested,
         "estimated_speech_seconds": total_speech,
         "speech_rate_cpm": speech_rate_cpm,
-        "script_counts": {"cjk_characters": len(CJK_RE.findall(script)), "latin_words_or_numbers": len(LATIN_WORD_RE.findall(script))},
+        "script_counts": {"cjk_characters": len(CJK_RE.findall(script)), "latin_words_or_numbers": len(LATIN_WORD_RE.findall(script)), "russian_words": len(CYRILLIC_WORD_RE.findall(script))},
         "estimation_note": "文字粗估，包含标点停顿；英文、数字和模型实际发声可能偏离，最终以原速实听为准",
         "sentence_estimates": [{"index": i, "script": sentence, "estimated_speech_seconds": duration} for i, (sentence, duration) in enumerate(zip(sentences, durations), 1)],
         "sentence_count": len(sentences),

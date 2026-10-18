@@ -9,6 +9,27 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REQUIRED = [
+    "scripts/studio.py",
+    "scripts/studio_transport.py",
+    "scripts/studio_assets.py",
+    "scripts/studio_media.py",
+    "scripts/speech_worker.py",
+    "references/studio-execution.md",
+    "assets/studio-config.example.json",
+    "tests/test_studio.py",
+    "scripts/model_registry.py",
+    "scripts/capability_planner.py",
+    "scripts/audio_timeline.py",
+    "scripts/request_preview.py",
+    "scripts/production_plan.py",
+    "assets/model-registry.json",
+    "assets/production-spec-example.json",
+    "assets/pilot-review-template.json",
+    "references/multimodel-production.md",
+    "scripts/ad_contract.py",
+    "references/commercial-direction.md",
+    "assets/ad-video-prompt-spec-template.json",
+    "assets/ad-review-template.json",
     "SKILL.md",
     "README.md",
     ".env.example",
@@ -112,10 +133,10 @@ def main() -> int:
             errors.append("提示词生成人声的精确台词听写证据记录不准确")
         if config.get("prompt_generated_voice_paid_attempt_count") != 1:
             errors.append("提示词生成人声付费提交次数记录不准确")
-        if config.get("custom_audio_fallback") != "prompt_generated_voice":
-            errors.append("自有音频不可用时没有回退到提示词生成人声")
+        if config.get("custom_audio_fallback") != "reject_and_require_explicit_voice_choice":
+            errors.append("自有音频不可用时必须拒绝，不能静默改用提示词声音")
         official = config.get("official_native_capabilities", {})
-        if official.get("reference_image_max_count") != 7 or official.get("preset_voice_max_count") != 3:
+        if official.get("reference_image_max_count") != 14 or official.get("preset_voice_max_count") != 3:
             errors.append("官方多参考图或预设声音能力上限记录不正确")
         if official.get("custom_audio_file_reference") != "trusted_partners_on_request":
             errors.append("自有音频文件的可信合作方限制记录不正确")

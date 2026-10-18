@@ -57,15 +57,28 @@ def technical_summary(path: Path) -> dict[str, Any]:
     }
 
 
+def validate_full_decode(path: Path, *, require_audio: bool = True) -> None:
+    """Decode both tracks completely; a valid container header is not sufficient."""
+    try:
+        result = run([
+            require_command("ffmpeg"), "-v", "error", "-xerror", "-i", str(path),
+            "-map", "0:v:0", "-map", "0:a:0" if require_audio else "0:a:0?", "-f", "null", "-",
+        ])
+    except subprocess.CalledProcessError:
+        raise ValueError("全片音视频解码失败，不能通过技术检查") from None
+    if result.stderr.strip():
+        raise ValueError("全片音视频解码发现错误，不能通过技术检查")
+
+
 def detect_tail_silence(path: Path, noise_db: str = "-35dB", min_duration: float = 0.25) -> dict[str, float | bool]:
     """用 FFmpeg 的 silencedetect 找最后一段连续静音，不改动源文件。"""
     ffmpeg = require_command("ffmpeg")
     duration = technical_summary(path)["duration_seconds"]
     result = subprocess.run(
-        [ffmpeg, "-hide_banner", "-i", str(path), "-af", f"silencedetect=noise={noise_db}:d={min_duration}", "-f", "null", "-"],
+        [ffmpeg, "-hide_banner", "-xerror", "-i", str(path), "-map", "0:a:0", "-af", f"silencedetect=noise={noise_db}:d={min_duration}", "-f", "null", "-"],
         text=True,
         capture_output=True,
-        check=False,
+        check=True,
     )
     log = f"{result.stdout}\n{result.stderr}"
     starts = [float(value) for value in re.findall(r"silence_start:\s*([0-9.]+)", log)]
@@ -88,8 +101,8 @@ def analyze_speech_pacing(path: Path, script: str, planned_cpm: int) -> dict[str
     """量化静音和整体交付节奏；只提供复核线索，不替代正常速度实听。"""
     duration = technical_summary(path)["duration_seconds"]
     result = subprocess.run(
-        [require_command("ffmpeg"), "-hide_banner", "-i", str(path), "-af", "silencedetect=noise=-35dB:d=0.15", "-f", "null", "-"],
-        text=True, capture_output=True, check=False,
+        [require_command("ffmpeg"), "-hide_banner", "-xerror", "-i", str(path), "-map", "0:a:0", "-af", "silencedetect=noise=-35dB:d=0.15", "-f", "null", "-"],
+        text=True, capture_output=True, check=True,
     )
     log = result.stdout + "\n" + result.stderr
     starts = [float(item) for item in re.findall(r"silence_start:\s*([0-9.]+)", log)]
@@ -125,7 +138,10 @@ def trim_tail_silence(path: Path, output: Path, work_dir: Path, keep_seconds: fl
     tail = float(silence["tail_silence_seconds"])
     if tail <= 0.6:
         return {"source": str(path.resolve()), "output": str(path.resolve()), "trimmed": False, **silence}
-    start = float(silence["last_silence_start_seconds"] or summary["duration_seconds"])
+    if tail >= summary["duration_seconds"] - 0.2:
+        raise ValueError("片段没有足够的非静音内容，不能将整段静音裁成合格口播")
+    start_value = silence["last_silence_start_seconds"]
+    start = float(start_value if start_value is not None else summary["duration_seconds"])
     trimmed_duration = max(0.1, min(summary["duration_seconds"], start + keep_seconds))
     ffmpeg = require_command("ffmpeg")
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,54 @@
+{
+  "motion_naturalness": {
+    "status": "pending",
+    "observations": ""
+  },
+  "gesture_phrase_fit": {
+    "status": "pending",
+    "observations": ""
+  },
+  "lip_sync": {
+    "status": "pending",
+    "observations": ""
+  },
+  "voice_naturalness": {
+    "status": "pending",
+    "observations": ""
+  },
+  "speech_pacing": {
+    "status": "pending",
+    "observations": ""
+  },
+  "script_complete": {
+    "status": "pending",
+    "observations": ""
+  },
+  "identity_consistency": {
+    "status": "pending",
+    "observations": ""
+  },
+  "normal_speed_playback": {
+    "status": "pending",
+    "observations": ""
+  },
+  "no_generated_text": {
+    "status": "pending",
+    "observations": ""
+  },
+  "voice_casting_match": {
+    "status": "pending",
+    "observations": ""
+  },
+  "reviewed_clip_sha256": "",
+  "spoken_words": "",
+  "text_review": {
+    "manifest_file": "",
+    "manifest_sha256": "",
+    "reviewer": "human_user",
+    "full_video_viewed": false,
+    "all_sampled_frames_viewed": false,
+    "last_frame_viewed": false,
+    "text_present": null,
+    "observations": ""
+  }
+}

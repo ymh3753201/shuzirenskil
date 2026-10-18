@@ -1,8 +1,12 @@
 # 数字人口播视频 Skill（shuzirenskil）
 
+当前版本：**2026.10.18-rc1，受控试用修订版**。本版新增多模型执行、自由配音/参考音色/严格音轨选择、长视频分段与广告验收，并加固转写、解码和时长检查。145 项核心自动化测试通过；真实模型和商业效果仍需逐项验收，见 [上线范围](shuzirenskil/references/release-readiness.md)。
+
 这是供 Codex 使用的数字人口播视频 Skill。它先分析素材和口播稿，给出完整制作方案；用户确认方案后才生成参考图；用户确认实际图片并说“开始制作”后，才进入可能收费的视频生成。多段视频先验第 1 段，完成后还要检查画面、声音和拼接。
 
 ## 安装
+
+零基础用户先看 [安装和使用说明](安装和使用说明.md)。下载本仓库 ZIP 并完整解压后，可以运行 `安装-macOS.command`、`安装-Windows.ps1` 或 `python3 -B install.py "/目标项目"`。安装程序离线校验全部 Skill 文件，不覆盖已有版本。
 
 1. 安装 Codex、Python 3.10+、FFmpeg（须包含 ffprobe）。
 2. 在需要使用 Skill 的当前项目目录打开 Codex。项目内安装位置是 `./.agents/skills/shuzirenskil`，其中必须包含 `SKILL.md`、`scripts`、`references` 和 `assets`。这样当前项目及其子目录可以使用它，不会覆盖用户全局 Skill。
@@ -22,8 +26,8 @@
 在 `shuzirenskil` 文件夹运行：
 
 ```bash
-python3 scripts/validate_skill.py
-python3 -m unittest discover -s tests -p 'test_*.py'
+python3 -B scripts/validate_skill.py
+python3 -B -m unittest discover -s tests -p 'test_*.py'
 ```
 
 这些检查只验证本地文件和模拟接口，不会替你申请或验证真实服务商权限。真实连通性检查应与付费生成分开进行。

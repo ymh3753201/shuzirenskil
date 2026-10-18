@@ -1,5 +1,7 @@
 # 执行流程
 
+2026-10-18：本文件描述现有 Grok 执行器。多模型离线计划见 `multimodel-production.md`。首段每项观察改用 `{"status":"pass|fail|pending","observations":"至少8字真实观察"}`；只有全部明确 pass 才放行。旧纯文字记录需重新验收，已通过但尚未提交后续片段的项目可再次 `review-pilot`，旧报告自动保存在 `review-history/`。
+
 3.0 新项目增加两个必要步骤：绑定图片后，按 `voice-casting-and-text-review.md` 完成 `review-character`，再走原定 `authorize`；视频下载后先运行 `inspect-visuals`，真实完整检查后把 `text_review` 合入 `review-pilot` 或最终 `review` 证据。首段与最终还要检查 `voice_casting_match`。检查项只在实际看听后标记通过。
 
 
@@ -59,3 +61,7 @@
 ## 7. 交付
 
 `finalize` 只接受所有必需检查为 `pass` 的项目。MikuAPI 当前完成了 4 秒常规单图、1 秒提示词人声和 15 秒单段提示词人声验证；最终报告必须保留本项目实际使用能力，并把 15 秒单段与长句逐字准确、跨段连续性等尚未验证能力分开。
+
+## 3.1 广告项目
+
+先读 `commercial-direction.md`，用广告模板并在 prepare 指定 `--purpose`。现有两次确认不变；角色证据、首段证据和两种最终视频证据都须合入 `ad_review`。预检核对场景/产品参考图角色，finalize 复核当前视频与广告证据。旧项目不自动迁移或继续消费历史额度；修订另建目录。禁止后期把用户照片直接放进候选或成片。

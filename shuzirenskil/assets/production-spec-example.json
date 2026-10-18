@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "name": "门店数字人口播方案",
+  "model_profile": "wan3-reference",
+  "voice": {
+    "mode": "model_generated",
+    "consistency": "best_effort"
+  },
+  "voice_design": "成年中性声音，清晰温和，句尾自然收声，语速利落。",
+  "script": "你好，欢迎了解我们的服务。你可以先告诉我你的实际需求。",
+  "assets": {
+    "person": {
+      "path": "person.png",
+      "kind": "image",
+      "role": "identity"
+    },
+    "optional_voice": {
+      "path": "optional-reference.wav",
+      "kind": "audio"
+    }
+  },
+  "reference_images": [
+    "person"
+  ],
+  "character_bible": {
+    "identity": "已确认的同一人物，脸型和发型稳定",
+    "wardrobe": "已确认的白色衬衫，保持袖口与领口细节",
+    "scene": "已确认的室内场景，不虚构门店设施",
+    "camera": "平视中景，稳定机位",
+    "lighting": "柔和侧前方光源，保持色温一致"
+  },
+  "resolution": "720p",
+  "aspect_ratio": "9:16",
+  "duration_mode": "content-fit",
+  "continuity_mode": "cut",
+  "purpose": "narration"
+}
