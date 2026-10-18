@@ -50,7 +50,7 @@ python3 scripts/production_plan.py slice-audio --plan /绝对路径/production-p
 
 ### 分镜与广告
 
-无 `shots` 时，按完整句子和模型允许秒数计算最少请求；`duration_mode=exact` 必须能用合法秒数与自然语速完成，不能补长静音。
+新项目 `duration_mode` 默认 `reference`：`target_seconds` 只是参考，最终按口播、旁白和镜头内容自然完成；不得修改已调好的声音、表情或动作来凑秒数。明确硬上限才选 `content-fit`，明确硬性精确时长才选 `exact`。主音轨不因参考时长而裁剪或拉伸。无 `shots` 时，按完整句子和模型允许秒数计算最少请求；`duration_mode=exact` 必须能用合法秒数与自然语速完成，不能补长静音。
 
 有 `shots` 时，每个镜头独立规划，使用 `content-fit`。`talking_head` 必须包含该镜头的台词；所有口播镜头合起来须与全文相同。`b_roll` 为动态产品或环境空镜，无台词且必须指定合法的 `duration_seconds`。原生配音路线的空镜声音丢弃并留静音；需要持续旁白应选择严格主音轨。可选 `merge_shots=true` 合并相邻同类型镜头，首段保持独立，合并总秒数须在模型范围内；严格音轨和 continue 保留独立边界。合并有完整分镜说明，不宣称一定降低实际计费。
 

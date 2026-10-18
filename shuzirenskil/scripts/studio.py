@@ -372,7 +372,7 @@ class Studio:
         folder=self.root/'outputs'/f'render-{time.time_ns()}'
         result=render(self.plan,clips,folder)
         target=self.plan.get('target_seconds')
-        if target and not self.plan['audio_plan']:
+        if target and self.plan.get('duration_mode') != 'reference' and not self.plan['audio_plan']:
             from studio_media import info
             tolerance=1/info(clips[0])['fps']+1e-6
             if ((self.plan.get('duration_mode')=='exact' and abs(result['duration_seconds']-target)>tolerance)

@@ -304,6 +304,17 @@ def plan_segments(
         return _plan_segments_v1(script, delivery_max_seconds, max_request_seconds, duration_mode, speech_rate_cpm)
     if planner_version != PLANNER_VERSION:
         raise ValueError(f"未知分段规划版本: {planner_version}")
+    if duration_mode == "reference":
+        if delivery_max_seconds is not None and (type(delivery_max_seconds) is not int or delivery_max_seconds < 1):
+            raise ValueError("参考时长必须是正整数秒")
+        # Preserve the approved speech rate and complete text. The user's estimate
+        # never changes packing, performance, or provider request length.
+        result = plan_segments(script, None, max_request_seconds, "content-fit", speech_rate_cpm, planner_version)
+        result.update(duration_mode_requested="reference", duration_mode="reference",
+                      duration_constraint_seconds=delivery_max_seconds,
+                      duration_source="user_reference" if delivery_max_seconds is not None else "content_estimate",
+                      reference_duration_seconds=delivery_max_seconds)
+        return result
     if delivery_max_seconds is not None and (isinstance(delivery_max_seconds, bool) or not isinstance(delivery_max_seconds, int) or delivery_max_seconds < 1):
         raise ValueError("目标时长必须是正整数秒")
     if not 1 <= max_request_seconds <= 15:

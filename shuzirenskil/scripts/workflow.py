@@ -265,7 +265,7 @@ def command_prepare(args: argparse.Namespace) -> None:
             "delivery_max_seconds": args.duration,
             "target_delivery_seconds": args.duration,
             "duration_mode_requested": args.duration_mode,
-            "duration_mode": "not-applicable",
+            "duration_mode": "reference" if args.duration_mode == "reference" else "not-applicable",
             "estimated_speech_seconds": None,
             "minimum_paid_segment_count": 0,
             "planned_request_total_seconds": 0,
@@ -1646,6 +1646,13 @@ def _load_review_evidence(kind: str, args: argparse.Namespace, checks: dict[str,
 
 def _duration_review_checks(duration: float, plan: dict[str, Any], route: str) -> dict[str, bool]:
     exact = plan.get("duration_mode") == "exact"
+    reference = plan.get("duration_mode") == "reference"
+    if reference:
+        return {
+            "within_confirmed_delivery_max": True,
+            "matches_exact_duration_intent": True,
+            "within_content_request_duration": route != "video_generation" or duration <= float(plan["planned_request_total_seconds"]) + 0.25,
+        }
     tolerance = float(plan.get("delivery_duration_tolerance_seconds") or 0)
     maximum = float(plan["target_delivery_seconds"]) + tolerance if exact else float(plan["delivery_max_seconds"]) + 0.25
     return {
@@ -1927,8 +1934,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     draft_plan = subparsers.add_parser("plan", help="方案阶段的免费本地时长规划，不创建项目")
     draft_plan.add_argument("--script-file", type=Path, required=True)
-    draft_plan.add_argument("--duration", type=int, help="exact 的用户目标；content-fit 的用户上限；无要求时省略")
-    draft_plan.add_argument("--duration-mode", choices=["auto", "exact", "content-fit"], default="auto")
+    draft_plan.add_argument("--duration", type=int, help="默认仅为内容规划参考；exact 为硬性时长，content-fit 为硬上限")
+    draft_plan.add_argument("--duration-mode", choices=["reference", "auto", "exact", "content-fit"], default="reference")
     draft_plan.add_argument("--speech-rate-cpm", type=int, default=260)
     draft_plan.set_defaults(handler=command_plan)
 
@@ -1941,9 +1948,9 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--duration", type=int, help="用户目标或上限秒数；未指定时按内容规划")
     prepare.add_argument(
         "--duration-mode",
-        choices=["auto", "exact", "content-fit"],
-        default="auto",
-        help="exact 对应用户指定时长；content-fit/auto 按内容规划，--duration 仅为上限，不按 15 的倍数猜测意图",
+        choices=["reference", "auto", "exact", "content-fit"],
+        default="reference",
+        help="默认 reference 以完整内容和自然表现为准；仅用户明确硬性要求时选 exact 或 content-fit 上限；auto 保留旧合同含义",
     )
     prepare.add_argument("--language", default="中文")
     prepare.add_argument("--aspect-ratio", choices=["9:16", "16:9"], default="9:16")

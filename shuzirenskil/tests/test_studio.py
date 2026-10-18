@@ -124,6 +124,21 @@ class StudioTests(unittest.TestCase):
         with self.assertRaises(ValueError):s.deliver()
         self.accept(s,'final');delivery=s.deliver();self.assertEqual(delivery['status'],'synthetic_test_delivery')
         self.assertFalse(delivery['metrics']['real_media_quality_verified'])
+    def test_reference_target_does_not_stretch_assembled_video(self):
+        self.spec['target_seconds']=45
+        s=self.prepare();self.approve(s)
+        self.assertEqual(s.plan['duration_mode'],'reference')
+        self.assertEqual(self.spec['voice_design'],s.plan['consistency_contract']['voice_design'])
+        for ident in s.state['jobs']:
+            s.submit(ident);s.poll(ident);self.accept(s,ident)
+        result=s.assemble()
+        self.assertEqual(result['duration_seconds'],8)
+        self.assertEqual(s.state['status'],'awaiting_final_review')
+    def test_reference_target_preserves_longer_master_audio(self):
+        self.spec['target_seconds']=1
+        s=self.prepare(locked=True)
+        self.assertEqual(s.plan['duration_mode'],'reference')
+        self.assertEqual(s.plan['audio_plan']['delivery_audio_seconds'],7)
     def test_locked_master_mixed_broll_and_lipsync(self):
         s=self.prepare(locked=True);self.approve(s)
         s.submit('segment_0001');s.poll('segment_0001');self.accept(s,'segment_0001')

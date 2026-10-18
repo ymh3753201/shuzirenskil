@@ -131,14 +131,14 @@ def build_plan(spec: dict, base: Path) -> dict:
                 raise ValueError("分镜没有覆盖完整主音轨句子")
         audio_plan = plan_audio(Path(bound[voice["selected_audio_asset"]]["path"]), spec.get("audio_cues", {}), profile, script, boundaries[:-1])
         target = spec.get("target_seconds")
-        duration_mode = spec.get("duration_mode", "content-fit")
-        if duration_mode not in {"content-fit", "exact"}:
-            raise ValueError("duration_mode 必须为 content-fit 或 exact")
+        duration_mode = spec.get("duration_mode", "reference")
+        if duration_mode not in {"reference", "content-fit", "exact"}:
+            raise ValueError("duration_mode 必须为 reference、content-fit 或 exact")
         if target is not None and (type(target) is not int or target < 1):
             raise ValueError("目标时长必须是正整数秒")
         if duration_mode == "exact" and target is None:
             raise ValueError("exact 模式需要目标时长")
-        if target is not None and ((duration_mode == "exact" and abs(target - audio_plan["delivery_audio_seconds"]) > 1 / audio_plan["master"]["sample_rate"])
+        if target is not None and duration_mode != "reference" and ((duration_mode == "exact" and abs(target - audio_plan["delivery_audio_seconds"]) > 1 / audio_plan["master"]["sample_rate"])
                                    or audio_plan["delivery_audio_seconds"] > target):
             raise ValueError("主音轨实际时长与用户目标冲突；不可裁掉语音或静默拉伸")
         segments = []
@@ -148,11 +148,11 @@ def build_plan(spec: dict, base: Path) -> dict:
                              "kind": shot['kind'] if shot else "talking_head",
                              "visual_brief": shot['visual_brief'] if shot else "自然正视镜头，克制动作"})
     elif shots is None:
-        timing = plan_narration(script, profile, target=spec.get("target_seconds"), mode=spec.get("duration_mode", "content-fit"), speech_rate_cpm=spec.get("speech_rate_cpm", 260))
+        timing = plan_narration(script, profile, target=spec.get("target_seconds"), mode=spec.get("duration_mode", "reference"), speech_rate_cpm=spec.get("speech_rate_cpm", 260))
         segments = [{**s, "shot_id": "narration", "kind": "talking_head", "visual_brief": "自然正视镜头，克制动作"} for s in timing["segments"]]
     else:
-        if not isinstance(shots, list) or not 1 <= len(shots) <= 500 or spec.get("duration_mode", "content-fit") != "content-fit":
-            raise ValueError("分镜需为 1–500 项；本阶段分镜采用 content-fit，逐镜头确定时长")
+        if not isinstance(shots, list) or not 1 <= len(shots) <= 500 or spec.get("duration_mode", "reference") not in {"reference", "content-fit"}:
+            raise ValueError("分镜需为 1–500 项；分镜采用 reference 或 content-fit，逐镜头确定时长")
         segments = []
         spoken_parts = []
         ids = set()
@@ -183,7 +183,7 @@ def build_plan(spec: dict, base: Path) -> dict:
         if _normalized("".join(spoken_parts)) != _normalized(script):
             raise ValueError("分镜台词遗漏、重复或修改了完整确认稿")
         maximum = spec.get("target_seconds")
-        if maximum is not None and (type(maximum) is not int or sum(s["request_seconds"] for s in segments) > maximum):
+        if maximum is not None and (type(maximum) is not int or maximum < 1 or (spec.get("duration_mode", "reference") != "reference" and sum(s["request_seconds"] for s in segments) > maximum)):
             raise ValueError("分镜总请求时长超过用户上限或上限无效")
 
     if type(spec.get('merge_shots', False)) is not bool:
@@ -243,7 +243,7 @@ def build_plan(spec: dict, base: Path) -> dict:
     if any(j["request_preview"]["payload"] is None for j in jobs):
         blockers.append("当前模型仅登记能力，尚无请求编译器")
     result = {"schema_version": "production-plan-1.0", "status": "offline_plan_ready", "execution_allowed": False,
-              "name": spec["name"], "purpose": purpose, "duration_mode": spec.get("duration_mode", "content-fit"), "target_seconds": spec.get("target_seconds"), "model_snapshot": profile, "voice": voice,
+              "name": spec["name"], "purpose": purpose, "duration_mode": spec.get("duration_mode", "reference"), "target_seconds": spec.get("target_seconds"), "model_snapshot": profile, "voice": voice,
               "assets": bound, "ignored_asset_ids": sorted(set(assets) - set(selected)),
               "consistency_contract": lock, "continuity_mode": continuity, "jobs": jobs,
               "resolution": resolution, "aspect_ratio": ratio, "audio_cues": spec.get("audio_cues"),

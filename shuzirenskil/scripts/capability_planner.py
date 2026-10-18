@@ -9,12 +9,16 @@ from model_registry import allowed_durations
 def plan_narration(script: str, profile: dict, *, target: int | None = None,
                    mode: str = "content-fit", speech_rate_cpm: int = 260) -> dict:
     choices = allowed_durations(profile)
-    if mode not in {"content-fit", "exact"}:
-        raise ValueError("新版规划 mode 为 content-fit 或 exact")
+    if mode not in {"reference", "content-fit", "exact"}:
+        raise ValueError("新版规划 mode 为 reference、content-fit 或 exact")
     if target is not None and (type(target) is not int or not 1 <= target <= 3600):
         raise ValueError("目标时长须为 1–3600 秒整数；更长内容请按章节规划")
     if mode == "exact" and target is None:
         raise ValueError("exact 需要 target")
+    if mode == "reference":
+        result = plan_narration(script, profile, target=None, mode="content-fit", speech_rate_cpm=speech_rate_cpm)
+        result.update(mode="reference", target_seconds=target, reference_duration_seconds=target)
+        return result
     sentences = split_sentences(script)
     if not sentences or any(not ends_complete_sentence(s) for s in sentences):
         raise ValueError("口播每句需要完整结束标点，不在半句话处切分")

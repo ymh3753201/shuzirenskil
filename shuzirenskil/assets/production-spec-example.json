@@ -31,7 +31,7 @@
   },
   "resolution": "720p",
   "aspect_ratio": "9:16",
-  "duration_mode": "content-fit",
+  "duration_mode": "reference",
   "continuity_mode": "cut",
   "purpose": "narration"
 }
