@@ -1,9 +1,16 @@
 {
-  "provider": {"base_url": "https://YOUR-WORKSPACE.cn-beijing.maas.aliyuncs.com", "key_env": "DASHSCOPE_API_KEY"},
-  "lip_sync": {"base_url": "https://queue.fal.run", "key_env": "FAL_KEY"},
-  "expected_dimensions": [720, 1280],
+  "provider": {
+    "base_url": "https://YOUR-WORKSPACE.cn-beijing.maas.aliyuncs.com",
+    "key_env": "DASHSCOPE_API_KEY"
+  },
+  "lip_sync": {
+    "base_url": "https://queue.fal.run",
+    "key_env": "FAL_KEY"
+  },
+  "expected_dimensions": [
+    720,
+    1280
+  ],
   "expected_fps": 30,
-  "rates": {"video_per_second": 0, "lip_sync_per_second": 0},
-  "currency": "CNY",
   "test_mode": false
 }

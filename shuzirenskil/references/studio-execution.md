@@ -32,7 +32,9 @@ python3 scripts/studio.py prepare --spec /path/spec.json --config /path/config.j
 python3 scripts/studio.py preflight --project /path/new-project --env-file /path/private.env
 ```
 
-`spec.json` 从 `assets/production-spec-example.json` 复制，按本次方案修改。`config.json` 从 `assets/studio-config.example.json` 复制：替换真实 Workspace、分辨率/帧率及**实际账号报价的保守预算单价**。模板的 0 价格不能提交真实请求。费用字段是预留估算，不是服务商结算证明；续接的视频输入也按所填单价预留。不同计价单位或折扣先换算为保守每秒上限，币种必须一致。
+`spec.json` 从 `assets/production-spec-example.json` 复制，按本次方案修改。`config.json` 从 `assets/studio-config.example.json` 复制：替换真实 Workspace、分辨率/帧率即可。默认不需要 `rates`、`currency` 或 `max_cost`；没有报价仍可正常准备、授权、提交、续接、口型处理和交付。未知金额记录为 `null`，不能冒充零费用。不要主动询价或要求用户接受未知价格。
+
+仅当用户主动要求金额上限时，可选填写单价和币种，并在授权中添加 `max_cost` 与 `currency`。此时才检查明确的金额限制；旧项目已记录的金额上限继续生效，不静默删除。普通新项目不得自行添加这些字段。
 
 | 服务 | 默认域名 | 专用变量示例 |
 | --- | --- | --- |
@@ -47,13 +49,13 @@ API Key 不写入 config、项目或报告。私密 `.env` 权限必须为 600�
 
 预检只查本地素材、配置和密钥是否存在，**不证明模型账号权限、余额或实际质量**。不要把没有通用免费权限查询接口的服务编造成“账号已验证”。
 
-prepare 产生不可随意修改的 `plan.json`、`config.json`、`contract.json` 和 `approval-template.json`。用户确认实际图片、完整方案、声音方式、上传目的地、首段试片与次数/秒数/预算/有效期后，把真实授权写入独立文件：
+prepare 产生不可随意修改的 `plan.json`、`config.json`、`contract.json` 和 `approval-template.json`。用户确认实际图片、完整方案、声音方式、上传目的地、首段试片及制作请求范围后，把真实授权写入独立文件：
 
 ```bash
-python3 scripts/studio.py authorize --project /path/new-project --evidence /path/approved-budget.json
+python3 scripts/studio.py authorize --project /path/new-project --evidence /path/approved-production.json
 ```
 
-审批模板默认全部未确认。开发或离线规划授权不等于真实素材上传/付费授权；已有明确用户授权可据实记录，不重复询问。
+审批模板不包含金额字段。次数与秒数按已确认方案登记，有效期记录在同一份制作授权中，不为这些内部字段另加确认轮次。审批模板默认全部未确认。开发或离线规划授权不等于真实素材上传/付费授权；已有明确用户授权可据实记录，不重复询问。
 
 ## 3. 素材传输
 
@@ -98,7 +100,7 @@ python3 scripts/studio.py context --project /path/new-project --job segment_0002
 
 ## 5. 超时恢复与只重做必要片段
 
-每次 POST 前写入费用预留和 `submitting`。超时、异常响应或进程中断保留 `submission_unknown/submitting`，禁止再次 POST。到服务商控制台核对合同对应的请求，再保存：
+每次 POST 前写入请求用量和 `submitting`。超时、异常响应或进程中断保留 `submission_unknown/submitting`，禁止再次 POST。到服务商控制台核对合同对应的请求，再保存：
 
 ```json
 {
@@ -112,7 +114,7 @@ python3 scripts/studio.py context --project /path/new-project --job segment_0002
 
 fal 的 task 还需原任务的 `status_url` 与 `response_url`。运行 `recover --job ... --evidence ...` 只查询恢复；下载故障再次 `poll` 也是原任务下载，不重新下单。没有查到任务不能把未知状态改成 planned。
 
-确需重做时，先获新的**累计**预算授权，再运行 `revise`，证据包含 `contract_digest、job_id、video_sha256、approved_by、reason`。保留所有旧视频与费用历史。分镜 cut 只重做所选段；若重做首段，后面已完成的视频需要按新基准重新验收，默认不重新收费生成。连续 continue 的下游依赖旧画面，需要连带重新规划并纳入新的累计预算。仍在运行或未知的任务不能直接重做。
+确需重做时，记录用户对重做范围的授权及新的累计请求额度，无需报价，再运行 `revise`，证据包含 `contract_digest、job_id、video_sha256、approved_by、reason`。保留所有旧视频与请求历史。分镜 cut 只重做所选段；若重做首段，后面已完成的视频需要按新基准重新验收，默认不重新收费生成。连续 continue 的下游依赖旧画面，需要连带重新规划并纳入已确认的累计请求范围。仍在运行或未知的任务不能直接重做。
 
 ## 6. 合成与交付
 
@@ -128,7 +130,7 @@ python3 scripts/studio.py status --project /path/new-project
 
 严格路线的 `final.lossless-audio.mov` 解码后每个 PCM 样本与主音轨比较；`master.wav` 原样保存；`final.mp4` 的 AAC 是有损发布版，不能说字节相同。字幕是外置 SRT，不自动烧入干净视频；原生声音使用逐段听审时间码，严格音轨使用全片已审时间码。
 
-合成成功是 `awaiting_final_review`。全片、全部接缝、音色、嘴形、文字与广告事实均通过后才能 `deliver`。交付时再检查文件指纹。指标记录费用预留、重做原因、首段首次检查结果和验收耗时；实际账单与获客表现需外部数据，不从合成成功推断。
+合成成功是 `awaiting_final_review`。全片、全部接缝、音色、嘴形、文字与广告事实均通过后才能 `deliver`。交付时再检查文件指纹。指标记录请求用量、重做原因、首段首次检查结果和验收耗时；实际账单与获客表现需外部数据，不从合成成功推断。
 
 ## 7. 本地声音生成与真实对齐（可选）
 

@@ -67,3 +67,7 @@ macOS 钥匙串保存示例（不要把真实 Key 写进文档）：`security ad
 - 多段声音质检：必须实听每段和拼接点，以 `cross_segment_voice_consistency` 记录证据；Whisper 台词转写不能替代音色检查。
 
 写稿、时长决策和免费规划见 `references/duration-planning.md`；参考图职责、提示词规则和上传方案见 `references/video-prompt-guide.md`。
+
+## 不强制报价（2026-10-19）
+
+用户确认制作后，不因缺少上游报价或费用估算暂停，不增加费用确认。默认配置和授权模板无需单价、币种或金额预算；按已确认制作范围继续。仅用户主动询价或明确限制金额时才处理费用。原有语速、表情、自然时长和质量检查不变。

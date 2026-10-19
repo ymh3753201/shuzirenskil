@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from _common import atomic_write_json,sha256_file,digest_json,read_json
-from studio import Studio,prepare,CHECKS,AUDIO_CHECKS
+from studio import Studio,prepare,config_check,CHECKS,AUDIO_CHECKS
 from studio_transport import Adapter,TransportError,json_request
 from studio_assets import resolve
 from studio_media import command,render,write_subtitles
@@ -88,7 +88,7 @@ class StudioTests(unittest.TestCase):
                      {'id':'two','kind':'talking_head','script':'欢迎。','visual_brief':'人物自然介绍服务'}]}
         self.config={'provider':{'base_url':self.remote.url,'key_env':'STUDIO_TEST_KEY'},
                      'lip_sync':{'base_url':self.remote.url,'key_env':'STUDIO_TEST_KEY'},
-                     'expected_dimensions':[32,56],'expected_fps':8,'rates':{'video_per_second':0.1,'lip_sync_per_second':0.2},'currency':'USD','test_mode':True}
+                     'expected_dimensions':[32,56],'expected_fps':8,'test_mode':True}
         self.env=patch.dict(os.environ,{'STUDIO_TEST_KEY':'synthetic-local-only'});self.env.start()
     def tearDown(self):self.env.stop();self.remote.close();self.temp.cleanup()
     def prepare(self,locked=False):
@@ -103,7 +103,7 @@ class StudioTests(unittest.TestCase):
         return Studio(self.root/'project')
     def approval(self,s):
         value=read_json(s.root/'approval-template.json');value.update(approved_by='synthetic_test_runner',
-            expires_at=(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat(),max_attempts=20,max_request_seconds=100,max_cost=100)
+            expires_at=(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat(),max_attempts=20,max_request_seconds=100)
         for k in ('images_reviewed','script_and_voice_approved','asset_upload_approved','audio_rights_confirmed','unverified_provider_pilot_approved'):value[k]=True
         return value
     def approve(self,s):s.authorize(self.approval(s))
@@ -116,6 +116,8 @@ class StudioTests(unittest.TestCase):
         s.review(ident,e)
     def test_native_end_to_end_and_unused_audio(self):
         s=self.prepare();self.approve(s)
+        self.assertNotIn('max_cost',read_json(s.root/'approval-template.json'))
+        self.assertNotIn('currency',read_json(s.root/'approval-template.json'))
         with self.assertRaises(ValueError):s.submit('segment_0002')
         for ident in s.state['jobs']:
             s.submit(ident);s.poll(ident);self.accept(s,ident)
@@ -124,6 +126,49 @@ class StudioTests(unittest.TestCase):
         with self.assertRaises(ValueError):s.deliver()
         self.accept(s,'final');delivery=s.deliver();self.assertEqual(delivery['status'],'synthetic_test_delivery')
         self.assertFalse(delivery['metrics']['real_media_quality_verified'])
+        self.assertIsNone(delivery['metrics']['cost_reserved'])
+        self.assertIsNone(delivery['metrics']['currency'])
+    def test_production_config_needs_no_prices(self):
+        plan=build_plan(self.spec,self.root)
+        config={'provider':{'base_url':'https://api.minimax.io','key_env':'MINIMAX_API_KEY'},
+                'expected_dimensions':[768,1366],'expected_fps':24,'test_mode':False}
+        config_check(config,plan)
+        self.assertEqual(self.remote.calls,[])
+    def test_old_zero_rate_template_is_unknown_not_free(self):
+        self.config.update(rates={'video_per_second':0,'lip_sync_per_second':0},currency='USD')
+        s=self.prepare();self.approve(s);s.submit('segment_0001')
+        self.assertIsNone(s.state['attempts'][0]['reserved_cost'])
+        self.assertIsNone(Studio(s.root).status()['cost_reserved'])
+        self.assertEqual(len(self.remote.calls),1)
+    def test_missing_lip_price_does_not_block_locked_audio(self):
+        self.config.update(rates={'video_per_second':0.1},currency='USD')
+        s=self.prepare(locked=True);self.approve(s)
+        s.submit('segment_0001');s.poll('segment_0001');self.accept(s,'segment_0001')
+        s.submit('segment_0001');s.poll('segment_0001');self.accept(s,'segment_0001')
+        self.assertIsNotNone(s.state['attempts'][0]['reserved_cost'])
+        self.assertIsNone(s.state['attempts'][1]['reserved_cost'])
+        self.assertIsNone(s.status()['cost_reserved'])
+    def test_only_explicit_monetary_cap_checks_cost(self):
+        self.config.update(rates={'video_per_second':0.1},currency='USD')
+        s=self.prepare();e=self.approval(s);e.update(max_cost=0.3,currency='USD');s.authorize(e)
+        with self.assertRaisesRegex(ValueError,'金额上限'):s.submit('segment_0001')
+        self.assertEqual(self.remote.calls,[])
+        e['max_cost']=0.5;s.authorize(e);s.submit('segment_0001')
+        self.assertAlmostEqual(s.state['attempts'][0]['reserved_cost'],0.4)
+    def test_user_monetary_cap_is_not_silently_ignored_without_prices(self):
+        s=self.prepare();e=self.approval(s);e.update(max_cost=1,currency='USD')
+        with self.assertRaises(ValueError):s.authorize(e)
+        self.assertEqual(self.remote.calls,[])
+    def test_no_price_still_obeys_request_seconds(self):
+        s=self.prepare();e=self.approval(s);e['max_request_seconds']=3;s.authorize(e)
+        with self.assertRaisesRegex(ValueError,'秒数上限'):s.submit('segment_0001')
+        self.assertEqual(self.remote.calls,[])
+    def test_legacy_priced_project_resumes_with_cumulative_cap(self):
+        self.config.update(rates={'video_per_second':0.1,'lip_sync_per_second':0.2},currency='USD')
+        s=self.prepare();e=self.approval(s);e.update(max_cost=0.5,currency='USD');s.authorize(e)
+        s.submit('segment_0001');s.poll('segment_0001');self.accept(s,'segment_0001');s=Studio(s.root)
+        with self.assertRaisesRegex(ValueError,'金额上限'):s.submit('segment_0002')
+        self.assertEqual(len(self.remote.calls),1)
     def test_reference_target_does_not_stretch_assembled_video(self):
         self.spec['target_seconds']=45
         s=self.prepare();self.approve(s)
@@ -174,7 +219,7 @@ class StudioTests(unittest.TestCase):
         e=read_json(Path(s.inspect('segment_0001')['review_template']))
         with self.assertRaises(ValueError):s.review('segment_0001',e)
         with self.assertRaises(ValueError):s.submit('segment_0002')
-    def test_revision_requires_new_budget_and_preserves_history(self):
+    def test_revision_requires_new_scope_approval_and_preserves_history(self):
         s=self.prepare();self.approve(s);s.submit('segment_0001');s.poll('segment_0001');self.accept(s,'segment_0001')
         e={'contract_digest':s.contract['digest'],'job_id':'segment_0001','video_sha256':s.job('segment_0001')[1]['clip_sha256'],
            'approved_by':'synthetic_test_runner','reason':'测试重做原因，保留旧片段记录。'}

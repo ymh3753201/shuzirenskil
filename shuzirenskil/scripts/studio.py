@@ -47,9 +47,11 @@ def config_check(config, plan):
     minimum=standard.get(plan['resolution'],1080)
     if min(dimensions)<minimum and not config.get('test_mode'):raise ValueError('输出尺寸低于已选分辨率')
     if config.get('expected_fps') is not None:number(config['expected_fps'],'预期帧率',1)
-    if not isinstance(config.get('currency'),str) or len(config['currency'])!=3:raise ValueError('currency 需三字母币种')
-    if set(config.get('rates',{}))!={'video_per_second','lip_sync_per_second'}:raise ValueError('必须明确每秒视频及口型的预算单价')
-    for value in config['rates'].values():number(value,'预算单价')
+    if config.get('currency') is not None and (not isinstance(config['currency'],str) or len(config['currency'])!=3):raise ValueError('currency 需三字母币种')
+    rates=config.get('rates') or {}
+    if not isinstance(rates,dict) or set(rates)-{'video_per_second','lip_sync_per_second'}:raise ValueError('可选单价字段无效')
+    for value in rates.values():
+        if value is not None:number(value,'可选单价')
     if type(config.get('test_mode',False)) is not bool:raise ValueError('test_mode 必须为布尔值')
     if not config.get('test_mode',False):
         provider=plan['model_snapshot']['provider']
@@ -57,8 +59,6 @@ def config_check(config, plan):
                'volcengine':{'ARK_API_KEY','SHUZIRENSKIL_ARK_API_KEY'},'google':{'GEMINI_API_KEY','GOOGLE_API_KEY'},
                '91topgo':{'SHUZIRENSKIL_91TOPGO_API_KEY'}}
         if config['provider']['key_env'] not in names.get(provider,set()):raise ValueError('请使用服务商专用密钥变量，不能混用不同服务商的 Key')
-        if config['rates']['video_per_second']<=0 or (plan['audio_plan'] and config['rates']['lip_sync_per_second']<=0):
-            raise ValueError('请先填写实际账号的保守每秒预算单价；生产模式不能以零价格提交')
         if plan['audio_plan'] and config['lip_sync']['key_env'] not in {'FAL_KEY','SHUZIRENSKIL_FAL_KEY'}:raise ValueError('口型接口须使用 FAL 专用密钥')
     Adapter(plan['model_snapshot']['provider'],config['provider'],'not-a-key',loopback=config.get('test_mode',False))
     if plan['audio_plan']:Adapter('fal',config['lip_sync'],'not-a-key',loopback=config.get('test_mode',False))
@@ -80,12 +80,11 @@ def prepare(spec_path, config_path, directory):
     atomic_write_json(directory/'state.json',state)
     template={'contract_digest':contract['digest'],'approved_by':'','expires_at':'','images_reviewed':False,
               'script_and_voice_approved':False,'asset_upload_approved':False,'audio_rights_confirmed':False,
-              'unverified_provider_pilot_approved':False,'max_attempts':0,'max_request_seconds':0,'max_cost':0,
-              'currency':config['currency']}
+              'unverified_provider_pilot_approved':False,'max_attempts':0,'max_request_seconds':0}
     atomic_write_json(directory/'approval-template.json',template)
     return {'status':'awaiting_authorization','contract_digest':contract['digest'],'project':str(directory.resolve()),
             'video_requests':len(plan['jobs']),'lip_sync_requests':sum(j['requires_lip_sync'] for j in plan['jobs']),
-            'note':'模板不是授权；必须由用户确认具体模型、素材、预算与声音选择'}
+            'note':'按用户已有制作确认记录模型、素材、声音和请求范围；无需报价、估费或单独费用确认'}
 
 
 class Studio:
@@ -140,25 +139,38 @@ class Studio:
         if self.plan['voice']['mode']!='model_generated':required.append('audio_rights_confirmed')
         if any(evidence.get(k) is not True for k in required):raise ValueError('素材、声音、上传或首次模型试片尚未获得明确确认')
         if type(evidence.get('max_attempts')) is not int or evidence['max_attempts']<1:raise ValueError('须明确最多付费请求次数')
-        for k in ('max_request_seconds','max_cost'):number(evidence.get(k),k)
-        if evidence.get('currency')!=self.config['currency']:raise ValueError('授权币种不同')
-        # New approval is a cumulative lifetime cap, never resets already reserved spend.
+        number(evidence.get('max_request_seconds'),'max_request_seconds')
+        # Monetary caps are opt-in only; ordinary production needs no quote.
+        self.check_cost_cap(evidence)
+        # New approval is cumulative and never resets already reserved requests.
         attempts=self.state['attempts']
-        if (len(attempts)>evidence['max_attempts'] or sum(x['seconds'] for x in attempts)>evidence['max_request_seconds']
-            or sum(x['reserved_cost'] for x in attempts)>evidence['max_cost']+1e-9):raise ValueError('累计授权不能低于已预留用量')
+        if len(attempts)>evidence['max_attempts'] or sum(x['seconds'] for x in attempts)>evidence['max_request_seconds']:raise ValueError('累计授权不能低于已预留用量')
         self.assets_unchanged();self.state['approvals'].append(copy.deepcopy(evidence));self.state['status']='authorized';self.save()
         return {'status':'authorized','approval_number':len(self.state['approvals'])}
     def current_approval(self):
-        if not self.state['approvals'] or not unexpired(self.state['approvals'][-1]['expires_at']):raise ValueError('没有有效费用授权')
+        if not self.state['approvals'] or not unexpired(self.state['approvals'][-1]['expires_at']):raise ValueError('没有有效制作授权')
         return self.state['approvals'][-1]
+    def estimate_cost(self,phase,seconds,input_seconds=0):
+        rate=(self.config.get('rates') or {}).get('lip_sync_per_second' if phase=='lip' else 'video_per_second')
+        # Old example zero rates mean unknown, never free generation.
+        if rate is None or rate<=0 or not self.config.get('currency'):return None
+        return (seconds+input_seconds)*rate
+    def check_cost_cap(self,approval,additional=None):
+        if approval.get('max_cost') is None:return
+        number(approval['max_cost'],'用户主动指定的金额上限')
+        if not self.config.get('currency') or approval.get('currency')!=self.config['currency']:raise ValueError('用户金额上限的币种与配置不匹配')
+        phases=['video']+(['lip'] if self.plan['audio_plan'] else [])
+        costs=[x.get('reserved_cost') for x in self.state['attempts']]+([] if additional is None else [additional])
+        if any(self.estimate_cost(p,1) is None for p in phases) or any(c is None for c in costs):
+            raise ValueError('用户主动设置了金额上限，但现有单价或历史金额不足以核验；不能声称满足此限制')
+        if sum(costs)>approval['max_cost']+1e-9:raise ValueError('本次请求将超过用户主动指定的累计金额上限')
     def reserve(self,job,phase):
         approval=self.current_approval();seconds=job.get('use_seconds',job['request_seconds']) if phase=='lip' else job['request_seconds']
         input_seconds=2 if phase=='video' and self.plan['continuity_mode']=='continue' and job['index']>1 else 0
-        # Use the approved conservative rate for output AND video context; provider invoice may differ.
-        cost=(seconds+input_seconds)*self.config['rates']['lip_sync_per_second' if phase=='lip' else 'video_per_second']
+        cost=self.estimate_cost(phase,seconds,input_seconds)
+        self.check_cost_cap(approval,cost)
         attempts=self.state['attempts']
-        if (len(attempts)+1>approval['max_attempts'] or sum(x['seconds'] for x in attempts)+seconds>approval['max_request_seconds']+1e-6
-            or sum(x['reserved_cost'] for x in attempts)+cost>approval['max_cost']+1e-9):raise ValueError('本次请求将超过累计次数、秒数或费用上限')
+        if len(attempts)+1>approval['max_attempts'] or sum(x['seconds'] for x in attempts)+seconds>approval['max_request_seconds']+1e-6:raise ValueError('本次请求将超过累计次数或秒数上限')
         entry={'job_id':job['job_id'],'phase':phase,'seconds':seconds,'input_video_seconds':input_seconds,'reserved_cost':cost,'created_at':utc_stamp(),
                'approval_number':len(self.state['approvals']),'state':'submitting'}
         attempts.append(entry);return entry
@@ -240,7 +252,7 @@ class Studio:
             record['task']=task;record['state']='submitted';attempt['state']='submitted';attempt['task_id']=task['id']
         except Exception:
             record['state']='submission_unknown';attempt['state']='submission_unknown';self.save()
-            raise TransportError('提交结果未确认，已保留费用预留；请查询服务商并 recover，禁止重复提交') from None
+            raise TransportError('提交结果未确认，已保留请求记录；请查询服务商并 recover，禁止重复提交') from None
         self.save();return {'status':'submitted','job_id':ident,'phase':phase,'task_id':task['id']}
     def recover(self,ident,evidence):
         job,record=self.job(ident)
@@ -347,7 +359,7 @@ class Studio:
             or evidence.get('video_sha256')!=record.get('clip_sha256') or evidence.get('approved_by')!=approval['approved_by']
             or not isinstance(evidence.get('reason'),str) or len(evidence['reason'].strip())<8):raise ValueError('重做须明确绑定片段、原视频、批准者和原因')
         used=max((a['approval_number'] for a in self.state['attempts'] if a['job_id']==ident),default=0)
-        if len(self.state['approvals'])<=used:raise ValueError('重做需要新的累计预算授权，不能复用上次试片授权')
+        if len(self.state['approvals'])<=used:raise ValueError('重做需要用户确认新的制作范围，不能复用上次试片授权；无需报价')
         downstream=[]
         if self.plan['continuity_mode']=='continue':
             downstream=[j['job_id'] for j in self.plan['jobs'] if j['index']>job['index']]
@@ -397,8 +409,8 @@ class Studio:
         pilot=[r for r in reviews if r['job_id']==self.plan['jobs'][0]['job_id'] and r['stage']=='review_pending']
         return {'status':self.state['status'],'jobs':{k:v['state'] for k,v in self.state['jobs'].items()},
                 'attempts_reserved':len(attempts),'seconds_reserved':sum(x['seconds'] for x in attempts),
-                'cost_reserved':sum(x['reserved_cost'] for x in attempts),'currency':self.config['currency'],
-                'provider_billed_cost':'未对账；预算预留不等于实际账单','revisions':len(self.state['revisions']),
+                'cost_reserved':sum(x['reserved_cost'] for x in attempts) if attempts and all(x.get('reserved_cost') is not None for x in attempts) else None,'currency':self.config.get('currency'),
+                'provider_billed_cost':'未查询；不影响已授权制作，不代表免费','revisions':len(self.state['revisions']),
                 'review_seconds':sum(x.get('review_seconds',0) for x in reviews),'pilot_first_review_checks_passed':pilot[0]['declared_checks_passed'] if pilot else None,'test_mode':self.loopback,
                 'real_media_quality_verified':False if self.loopback else self.state['status']=='delivered'}
     def deliver(self):

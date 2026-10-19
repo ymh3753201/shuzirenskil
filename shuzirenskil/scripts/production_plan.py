@@ -236,7 +236,7 @@ def build_plan(spec: dict, base: Path) -> dict:
                      "requires_lip_sync": voice["mode"] == "locked_audio" and is_talking,
                      "request_preview": preview})
         cursor += use_seconds
-    blockers = ["此文件是本地生产计划；需经 studio.py 建立项目、确认合同与费用授权后提交",
+    blockers = ["此文件是本地生产计划；需经 studio.py 建立项目、记录已确认的制作范围后提交，无需报价",
                 "需要账号级能力验收、素材传输和按既有流程确认图片与付费上限"]
     if voice["mode"] == "locked_audio":
         blockers.append("严格音轨需要单独配置并授权 fal 口型处理；最终保留完整主音轨")
@@ -250,7 +250,7 @@ def build_plan(spec: dict, base: Path) -> dict:
               "audio_plan": audio_plan, "ad_contract": ad,
               "planned_delivery_seconds": round(cursor, 6), "request_count": len(jobs),
               "request_seconds": sum(j["request_seconds"] for j in jobs), "cost_estimate": None,
-              "cost_note": "未获取账号报价；镜头边界保持独立，不声称全局最低成本",
+              "cost_note": "报价不是制作前置条件；未知金额不阻断已授权请求，也不代表免费",
               "actual_timeline_required": audio_plan is None,
               "required_reviews": ["逐段正常速度看听", "台词", "人物与产品身份", "口型", "跨段音色", "接缝", "画面文字", "广告事实和行动引导"],
               "execution_blockers": blockers}
