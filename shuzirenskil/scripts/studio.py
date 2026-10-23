@@ -201,11 +201,13 @@ class Studio:
         for item in self.plan['assets'].values():
             token='asset://'+item['sha256']
             if token not in serialized:continue
-            if profile['provider']=='91topgo':
+            from provider_contract import image_transport
+            transport = image_transport(profile['provider']) if item['kind']=='image' else None
+            if transport=='jpeg_data_uri':
                 from image_transport import local_image_data_uri
                 mapping[token]=local_image_data_uri(Path(item['path']));continue
             mapping[token]=resolve(item['path'],item['sha256'],bindings,
-                require_url=profile['provider']=='aliyun' and item['kind']=='audio',loopback=self.loopback)
+                require_url=(profile['provider']=='aliyun' and item['kind']=='audio') or transport=='https_required',loopback=self.loopback)
             if mapping[token].startswith('asset://asset-') and profile['provider']!='volcengine':raise ValueError('人像资产 ID 仅适用于 Seedance')
         if profile['provider']=='google':
             for ref in payload['instances'][0]['referenceImages']:
@@ -242,16 +244,24 @@ class Studio:
         if self.plan['continuity_mode']=='continue' and job['index']>1:self.verify_accepted(self.plan['jobs'][job['index']-2]['job_id'])
         self.preflight()
         adapter=self.adapter(phase)
-        payload=self._payload(job,record,phase)
+        try:
+            payload=self._payload(job,record,phase)
+        except (ValueError, TransportError):
+            record['pre_submit_diagnostic']={'stage':'asset_preparation','video_post_sent':False}
+            self.save()
+            raise
+        record.pop('pre_submit_diagnostic',None)
         # Serialize before reservation so local type/body errors do not create uncertain paid tasks.
         if len(json.dumps(payload,ensure_ascii=False).encode())>64*1024*1024:raise ValueError('请求体超过 64 MiB')
         attempt=self.reserve(job,phase);record['state']='submitting';record['attempt_index']=len(self.state['attempts'])-1
         attempt['request_digest']=digest_json(payload);self.save()
         try:
             task=adapter.create(payload)
+            attempt['http_diagnostic']=adapter.last_diagnostic
             record['task']=task;record['state']='submitted';attempt['state']='submitted';attempt['task_id']=task['id']
         except Exception as exc:
             record['state']='submission_unknown';attempt['state']='submission_unknown'
+            attempt['http_diagnostic']=getattr(exc, 'diagnostic', {}) if isinstance(exc, TransportError) else {}
             attempt['diagnostic']=str(exc)[:2000] if isinstance(exc, TransportError) else '本地异常；详情未保存以避免泄露凭据'
             self.save()
             raise TransportError('提交结果未确认，已保留脱敏诊断；禁止重复提交；' + attempt['diagnostic']) from None

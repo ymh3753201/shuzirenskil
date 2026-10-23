@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from _common import sha256_file
 from studio_transport import data_uri, request, safe_url
@@ -41,6 +41,13 @@ def resolve(path, sha, bindings, *, require_url=False, loopback=False):
         if url.startswith('asset://asset-'):
             if binding.get('portrait_authorized') is not True:raise ValueError('Seedance 人像资产未确认授权')
             return url
+        # Operational safety window, not a provider SLA. Allow longer explicit windows.
+        minimum = binding.get('min_remaining_seconds', 1800)
+        if type(minimum) is not int or minimum < 1800:
+            raise ValueError('素材地址安全余量至少 1800 秒；应覆盖排队和生成时间')
+        expires = datetime.fromisoformat(binding['expires_at'].replace('Z','+00:00'))
+        if expires < datetime.now(timezone.utc) + timedelta(seconds=minimum):
+            raise ValueError('素材链接剩余有效期不足；请续期后再提交，不创建视频任务')
         safe_url(url,loopback=loopback)
         # Optional user-provided presigned PUT is scoped to this content hash. Never set public ACL.
         if binding.get('put_url'):

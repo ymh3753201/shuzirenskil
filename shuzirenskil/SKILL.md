@@ -9,6 +9,10 @@ description: 规划和制作数字人口播与门店、公司、产品获客广�
 
 运行环境：Python 3.10+、FFmpeg/ffprobe；本地字幕可选安装 whisper-cli 和离线 Whisper 模型。
 
+## 2026-10-24 文档驱动的接口兼容
+
+新增模型、服务商或修改图片传输前，先读 `references/provider-integration.md`，按该供应商 API 文档分别实现请求、任务编号、状态和素材协议。未知协议不得靠更换模型名猜测接入；保留原有制作及验收流程。
+
 ## 2026-10-24 安装和接口兼容修订
 
 首次安装、配置密钥、切换服务商或遇到缺少任务编号时，先读 `references/setup-and-troubleshooting.md` 并实际完成保存与回读检查。新增 Seedance 2.0 独立能力档案与 AI 跃云 Grok 适配；不改变现有声音、自然时长、两次确认、首段和全片验收规则。

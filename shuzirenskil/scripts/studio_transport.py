@@ -6,6 +6,7 @@ import json
 import mimetypes
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -14,7 +15,9 @@ from pathlib import Path
 MAX_BODY = 64 * 1024 * 1024
 
 class TransportError(RuntimeError):
-    pass
+    def __init__(self, message, diagnostic=None):
+        super().__init__(message)
+        self.diagnostic = diagnostic or {}
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -32,7 +35,7 @@ def safe_url(url, *, loopback=False):
     return parsed
 
 
-def request(method, url, *, headers=None, payload=None, raw=None, limit=4*1024*1024, loopback=False):
+def request(method, url, *, headers=None, payload=None, raw=None, limit=4*1024*1024, loopback=False, diagnostic=None):
     safe_url(url, loopback=loopback)
     headers = dict(headers or {})
     body = raw
@@ -42,14 +45,25 @@ def request(method, url, *, headers=None, payload=None, raw=None, limit=4*1024*1
     if body is not None and len(body) > MAX_BODY:
         raise ValueError("请求体超过 64 MiB；请改用已绑定的私有素材 URL")
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    started = time.monotonic()
+    def record(response=None, outcome='response'):
+        if diagnostic is not None:
+            trace = response.headers.get('x-request-id','') if response is not None else ''
+            diagnostic.update(method=method, host=urllib.parse.urlsplit(url).hostname,
+                elapsed_seconds=round(time.monotonic()-started,3), outcome=outcome,
+                http_status=getattr(response,'code',None),
+                trace_id=trace if re.fullmatch(r'[A-Za-z0-9._:-]{1,200}',trace) else '')
     try:
         with urllib.request.build_opener(NoRedirect()).open(req, timeout=90) as response:
+            record(response)
             data = response.read(limit + 1)
             if len(data) > limit:
                 raise TransportError("响应超过大小上限")
+            record(response)
             return data
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         # Do not echo bodies, signed URLs or API credentials into logs.
+        record(exc if isinstance(exc, urllib.error.HTTPError) else None, 'http_error' if isinstance(exc, urllib.error.HTTPError) else 'network_unknown')
         code = getattr(exc, "code", None)
         if isinstance(exc, urllib.error.HTTPError):
             from response_diagnostics import summary
@@ -97,6 +111,7 @@ class Adapter:
     """No remote calls in construction. Keys are fetched only by the caller at execution."""
     def __init__(self, provider, config, key, *, loopback=False):
         self.provider, self.key, self.loopback = provider, key, loopback
+        self.last_diagnostic = {}
         defaults = {'minimax':'https://api.minimax.io', 'volcengine':'https://ark.cn-beijing.volces.com',
                     'google':'https://generativelanguage.googleapis.com', 'fal':'https://queue.fal.run',
                     'aihge':'https://api-hk.aihge.com', '91topgo':'https://router.91topgo.com'}
@@ -121,7 +136,13 @@ class Adapter:
         url = path if path.startswith(('https://','http://')) else self.base + path
         if urllib.parse.urlsplit(url).netloc != urllib.parse.urlsplit(self.base).netloc:
             raise ValueError("任务返回地址不属于已绑定服务商，拒绝转发密钥")
-        return json_request(method,url,headers=self.headers,payload=payload,loopback=self.loopback)
+        diagnostic = {}
+        self.last_diagnostic = diagnostic
+        try:
+            return json_request(method,url,headers=self.headers,payload=payload,loopback=self.loopback,diagnostic=diagnostic)
+        except TransportError as exc:
+            exc.diagnostic = diagnostic
+            raise
 
     def create(self, payload):
         p = self.provider
@@ -136,12 +157,10 @@ class Adapter:
         result = self._call('POST',path,payload)
         from response_diagnostics import failed, summary
         if failed(result): raise TransportError('Provider 业务错误: ' + summary(result, self.key))
-        task_id = result.get('output',{}).get('task_id') if p=='aliyun' else result.get({'minimax':'task_id','volcengine':'id','google':'name','fal':'request_id','aihge':'request_id','91topgo':'id'}[p])
-        if p in {'91topgo','aihge'}:
-            from provider import _first_string
-            task_id=_first_string(result,(("task_id",),("request_id",),("id",),("data","task_id"),("data","request_id"),("data","id"),("video","task_id"),("video","request_id"),("video","id")))
+        from provider_contract import task_identifier
+        task_id = task_identifier(p, result)
         if not isinstance(task_id,str) or not task_id or len(task_id)>512 or not re.fullmatch(r'[A-Za-z0-9_./:-]+',task_id):
-            raise TransportError("提交后没有有效任务 ID；禁止重发；" + summary(result, self.key))
+            raise TransportError("提交后没有有效任务 ID；禁止重发；" + summary(result, self.key), self.last_diagnostic)
         task={'id':task_id}
         if p == 'fal':
             for k in ('status_url','response_url'):
@@ -183,11 +202,9 @@ class Adapter:
             status=result.get('status',''); url=extract_video_url(result)
             if url:url=urllib.parse.urljoin(self.base+'/',url)
             if not url and status in {'completed','succeeded','done'}: url=self.base+'/v1/videos/'+ident+'/content'
-        status=str(status).lower()
-        if status in {'succeeded','completed','success','done'}: state='succeeded'
-        elif status in {'failed','cancelled','canceled','error'}: state='failed'
-        elif status not in {'pending','queued','running','in_queue','in_progress','processing','submitted'}:
-            raise TransportError('未知任务状态，请保留任务 ID 并查询服务商')
+        from provider_contract import task_state
+        try: state = task_state(p, status)
+        except ValueError as exc: raise TransportError(str(exc)) from None
         if state=='succeeded' and not url: raise TransportError('任务完成但无媒体地址，不能重复提交')
         return {'state':state,'url':url}
 
