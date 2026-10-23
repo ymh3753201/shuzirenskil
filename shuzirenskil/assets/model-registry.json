@@ -467,6 +467,116 @@
       "restrictions": [
         "仅登记参考图片的 8 秒子集；其他模式需独立能力记录"
       ]
+    },
+    "seedance20-reference": {
+      "id": "seedance20-reference",
+      "provider": "volcengine",
+      "model": "doubao-seedance-2-0-260128",
+      "input_mode": "reference",
+      "duration_seconds": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "resolutions": [
+        "720p",
+        "1080p"
+      ],
+      "aspect_ratios": [
+        "9:16",
+        "16:9"
+      ],
+      "native_speech": true,
+      "reference_timbre": true,
+      "max_images": 9,
+      "compiler": "seedance20",
+      "reviewed_on": "2026-10-24",
+      "sources": [
+        "https://docs.volcengine.com/docs/ark/seedance-2-0?lang=zh"
+      ],
+      "status": {
+        "documented": true,
+        "request_preview_implemented": true,
+        "new_executor_implemented": true,
+        "account_verified": false,
+        "business_accepted": false,
+        "mock_protocol_verified": false,
+        "live_executor_verified": false
+      },
+      "planning_scope": "保守输入子集；不代表模型全部能力",
+      "continuation_implemented": false,
+      "audio_limits": {
+        "min_seconds": 2,
+        "max_seconds": 15,
+        "max_bytes": 15000000,
+        "formats": [
+          "wav",
+          "mp3"
+        ]
+      },
+      "restrictions": [
+        "真人参考素材需核对当前账号的人像资产准入"
+      ]
+    },
+    "aihge-grok-reference": {
+      "id": "aihge-grok-reference",
+      "provider": "aihge",
+      "model": "grok-imagine-video-1.5",
+      "input_mode": "reference",
+      "duration_seconds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "resolutions": [
+        "480p",
+        "720p"
+      ],
+      "aspect_ratios": [
+        "9:16",
+        "16:9"
+      ],
+      "native_speech": true,
+      "reference_timbre": false,
+      "max_images": 7,
+      "compiler": "aihge_grok",
+      "reviewed_on": "2026-10-24",
+      "sources": [
+        "https://api-hk.aihge.com"
+      ],
+      "status": {
+        "documented": false,
+        "request_preview_implemented": true,
+        "new_executor_implemented": true,
+        "account_verified": false,
+        "business_accepted": false,
+        "mock_protocol_verified": false,
+        "live_executor_verified": false
+      },
+      "planning_scope": "保守输入子集；不代表模型全部能力",
+      "continuation_implemented": false,
+      "historical_evidence": "2026-10-24 单次纯文本 15 秒 480p 创建查询下载通过；图片输入及数字人口播待真实首段验收"
     }
   },
   "catalog_only": [

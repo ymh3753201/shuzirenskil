@@ -103,6 +103,12 @@ def load_private_value(
         if existing:
             return existing
 
+    from credential_store import read as read_credential
+    for candidate in names:
+        value = read_credential(candidate)
+        if value:
+            return value
+
     candidates = [project_dir / ".env", Path.cwd() / ".env"]
     checked: set[Path] = set()
     for candidate in candidates:

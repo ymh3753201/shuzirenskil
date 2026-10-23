@@ -45,7 +45,7 @@ python3 scripts/studio.py preflight --project /path/new-project --env-file /path
 | 91topgo | `router.91topgo.com` | `SHUZIRENSKIL_91TOPGO_API_KEY` |
 | fal 口型 | `queue.fal.run` | `FAL_KEY` |
 
-API Key 不写入 config、项目或报告。私密 `.env` 权限必须为 600。91topgo 也保留专用钥匙串。测试模式仅允许本机模拟服务，不能用 `test_mode=true` 调真实接口。
+API Key 不写入 config、项目或报告。新用户优先使用系统凭据库，配置步骤见 `setup-and-troubleshooting.md`；旧 `.env` 在 POSIX 系统须为 600，Windows 须检查 NTFS ACL。91topgo 也保留专用钥匙串。测试模式仅允许本机模拟服务，不能用 `test_mode=true` 调真实接口。
 
 预检只查本地素材、配置和密钥是否存在，**不证明模型账号权限、余额或实际质量**。不要把没有通用免费权限查询接口的服务编造成“账号已验证”。
 

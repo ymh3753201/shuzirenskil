@@ -77,18 +77,24 @@ def _json_request(url: str, method: str, api_key: str, payload: dict[str, Any] |
         raise ProviderError("Provider 返回的不是可识别 JSON", ambiguous=method == "POST") from exc
     if not isinstance(value, dict):
         raise ProviderError("Provider JSON 顶层不是对象", ambiguous=method == "POST")
+    from response_diagnostics import failed, summary
+    if failed(value):
+        raise ProviderError('Provider 业务错误: ' + summary(value, api_key), ambiguous=method == 'POST')
     return value
 
 
 def create_task(base_url: str, path: str, api_key: str, payload: dict[str, Any], timeout: float) -> str:
     value = _json_request(f"{base_url.rstrip('/')}{path}", "POST", api_key, payload, timeout)
+    from response_diagnostics import failed, summary
+    if failed(value):
+        raise ProviderError('Provider 业务错误: ' + summary(value, api_key), ambiguous=True)
     task_id = _first_string(value, (
         ("task_id",), ("request_id",), ("id",),
         ("data", "task_id"), ("data", "request_id"), ("data", "id"),
         ("video", "task_id"), ("video", "request_id"), ("video", "id"),
     ))
     if not task_id or not TASK_ID_RE.fullmatch(task_id):
-        raise ProviderError("创建响应缺少文档约定的任务编号，禁止猜测或重试", ambiguous=True)
+        raise ProviderError("创建响应缺少文档约定的任务编号，禁止猜测或重试；" + summary(value, api_key), ambiguous=True)
     return task_id
 
 

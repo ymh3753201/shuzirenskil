@@ -57,7 +57,7 @@ def config_check(config, plan):
         provider=plan['model_snapshot']['provider']
         names={'aliyun':{'DASHSCOPE_API_KEY','SHUZIRENSKIL_ALIYUN_API_KEY'},'minimax':{'MINIMAX_API_KEY','SHUZIRENSKIL_MINIMAX_API_KEY'},
                'volcengine':{'ARK_API_KEY','SHUZIRENSKIL_ARK_API_KEY'},'google':{'GEMINI_API_KEY','GOOGLE_API_KEY'},
-               '91topgo':{'SHUZIRENSKIL_91TOPGO_API_KEY'}}
+               'aihge':{'SHUZIRENSKIL_AIHGE_API_KEY'},'91topgo':{'SHUZIRENSKIL_91TOPGO_API_KEY'}}
         if config['provider']['key_env'] not in names.get(provider,set()):raise ValueError('请使用服务商专用密钥变量，不能混用不同服务商的 Key')
         if plan['audio_plan'] and config['lip_sync']['key_env'] not in {'FAL_KEY','SHUZIRENSKIL_FAL_KEY'}:raise ValueError('口型接口须使用 FAL 专用密钥')
     Adapter(plan['model_snapshot']['provider'],config['provider'],'not-a-key',loopback=config.get('test_mode',False))
@@ -250,9 +250,11 @@ class Studio:
         try:
             task=adapter.create(payload)
             record['task']=task;record['state']='submitted';attempt['state']='submitted';attempt['task_id']=task['id']
-        except Exception:
-            record['state']='submission_unknown';attempt['state']='submission_unknown';self.save()
-            raise TransportError('提交结果未确认，已保留请求记录；请查询服务商并 recover，禁止重复提交') from None
+        except Exception as exc:
+            record['state']='submission_unknown';attempt['state']='submission_unknown'
+            attempt['diagnostic']=str(exc)[:2000] if isinstance(exc, TransportError) else '本地异常；详情未保存以避免泄露凭据'
+            self.save()
+            raise TransportError('提交结果未确认，已保留脱敏诊断；禁止重复提交；' + attempt['diagnostic']) from None
         self.save();return {'status':'submitted','job_id':ident,'phase':phase,'task_id':task['id']}
     def recover(self,ident,evidence):
         job,record=self.job(ident)

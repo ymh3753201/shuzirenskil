@@ -37,7 +37,7 @@ def compile_preview(profile: dict, *, prompt: str, seconds: int, resolution: str
         payload = {"model": profile["model"], "content": content, "duration": seconds,
                    "resolution": resolution.upper(), "ratio": ratio}
         endpoint = "https://api.minimax.io/v2/video_generation"
-    elif compiler == "seedance25":
+    elif compiler in {"seedance25", "seedance20"}:
         content = [{"type": "text", "text": prompt}]
         content += [{"type": "image_url", "image_url": {"url": image}, "role": "reference_image"} for image in images]
         if audio:
@@ -50,6 +50,9 @@ def compile_preview(profile: dict, *, prompt: str, seconds: int, resolution: str
                    "referenceImages": [{"image": {"asset_token": image}, "referenceType": "asset"} for image in images]}],
                    "parameters": {"durationSeconds": seconds, "resolution": resolution, "aspectRatio": ratio}}
         endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{model}:predictLongRunning"
+    elif compiler == "aihge_grok":
+        payload = {"model": profile["model"], "prompt": prompt, "duration": seconds, "resolution": resolution, "aspect_ratio": ratio, "reference_images": [{"url": x} for x in images]}
+        endpoint = "https://api-hk.aihge.com/v1/videos"
     elif compiler == "legacy_preview":
         payload = {"model": profile["model"], "prompt": prompt, "seconds": str(seconds), "reference_images": [{"url": x} for x in images]}
         endpoint = "https://router.91topgo.com/v1/videos"

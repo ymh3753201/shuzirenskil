@@ -51,7 +51,12 @@ def request(method, url, *, headers=None, payload=None, raw=None, limit=4*1024*1
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         # Do not echo bodies, signed URLs or API credentials into logs.
         code = getattr(exc, "code", None)
-        if isinstance(exc, urllib.error.HTTPError): exc.close()
+        if isinstance(exc, urllib.error.HTTPError):
+            from response_diagnostics import summary
+            try: detail = summary(json.loads(exc.read(8192)), headers.get('Authorization','').split(' ',1)[-1] or headers.get('x-goog-api-key',''))
+            except (ValueError, UnicodeError): detail = '响应不是 JSON'
+            finally: exc.close()
+            raise TransportError(f'HTTP {code}: {detail}；未自动重试') from None
         raise TransportError(f"HTTP 请求未确认成功，状态码 {code or 'unknown'}；未自动重试") from None
 
 
@@ -62,6 +67,10 @@ def json_request(method, url, **kwargs):
         raise TransportError("接口响应不是有效 JSON；未自动重试") from None
     if not isinstance(value, dict):
         raise TransportError("接口响应不是 JSON 对象")
+    from response_diagnostics import failed, summary
+    if failed(value):
+        auth = (kwargs.get('headers') or {}).get('Authorization', '')
+        raise TransportError('Provider 业务错误: ' + summary(value, auth.split(' ',1)[-1] or (kwargs.get('headers') or {}).get('x-goog-api-key','')))
     return value
 
 
@@ -90,19 +99,19 @@ class Adapter:
         self.provider, self.key, self.loopback = provider, key, loopback
         defaults = {'minimax':'https://api.minimax.io', 'volcengine':'https://ark.cn-beijing.volces.com',
                     'google':'https://generativelanguage.googleapis.com', 'fal':'https://queue.fal.run',
-                    '91topgo':'https://router.91topgo.com'}
+                    'aihge':'https://api-hk.aihge.com', '91topgo':'https://router.91topgo.com'}
         self.base = config.get('base_url', defaults.get(provider, '')).rstrip('/')
         host = safe_url(self.base, loopback=loopback).hostname
         if loopback and host not in {'127.0.0.1','localhost'}:
             raise ValueError('测试模式只能连接本机模拟服务器，不能调用真实付费服务')
         expected = {'minimax':{'api.minimax.io','api.minimaxi.com'}, 'volcengine':{'ark.cn-beijing.volces.com'},
-                    'google':{'generativelanguage.googleapis.com'}, 'fal':{'queue.fal.run'}, '91topgo':{'router.91topgo.com'}}
+                    'google':{'generativelanguage.googleapis.com'}, 'fal':{'queue.fal.run'}, 'aihge':{'api-hk.aihge.com'}, '91topgo':{'router.91topgo.com'}}
         allowed = host in expected.get(provider,set())
         if provider == 'aliyun':
             allowed = bool(re.fullmatch(r'[a-zA-Z0-9-]+\.cn-beijing\.maas\.aliyuncs\.com', host))
         if not allowed and not (loopback and host in {'127.0.0.1','localhost'}):
             raise ValueError("API 主机不属于此适配器的已登记服务商")
-        if provider not in {'aliyun','minimax','volcengine','google','fal','91topgo'}:
+        if provider not in {'aliyun','minimax','volcengine','google','fal','91topgo','aihge'}:
             raise ValueError("此服务商执行适配器未接入")
         self.headers = {'x-goog-api-key':key} if provider == 'google' else {'Authorization':('Key ' if provider == 'fal' else 'Bearer ') + key}
         if provider == 'aliyun': self.headers['X-DashScope-Async']='enable'
@@ -117,7 +126,7 @@ class Adapter:
     def create(self, payload):
         p = self.provider
         paths = {'aliyun':'/api/v1/services/aigc/video-generation/video-synthesis', 'minimax':'/v2/video_generation',
-                 'volcengine':'/api/v3/contents/generations/tasks', 'fal':'/fal-ai/sync-lipsync/v2', '91topgo':'/v1/videos'}
+                 'volcengine':'/api/v3/contents/generations/tasks', 'fal':'/fal-ai/sync-lipsync/v2', 'aihge':'/v1/videos', '91topgo':'/v1/videos'}
         if p == 'google':
             payload = copy.deepcopy(payload)
             model = payload.pop('model')
@@ -125,12 +134,14 @@ class Adapter:
             path='/v1beta/models/'+model+':predictLongRunning'
         else: path=paths[p]
         result = self._call('POST',path,payload)
-        task_id = result.get('output',{}).get('task_id') if p=='aliyun' else result.get({'minimax':'task_id','volcengine':'id','google':'name','fal':'request_id','91topgo':'id'}[p])
-        if p=='91topgo':
+        from response_diagnostics import failed, summary
+        if failed(result): raise TransportError('Provider 业务错误: ' + summary(result, self.key))
+        task_id = result.get('output',{}).get('task_id') if p=='aliyun' else result.get({'minimax':'task_id','volcengine':'id','google':'name','fal':'request_id','aihge':'request_id','91topgo':'id'}[p])
+        if p in {'91topgo','aihge'}:
             from provider import _first_string
             task_id=_first_string(result,(("task_id",),("request_id",),("id",),("data","task_id"),("data","request_id"),("data","id"),("video","task_id"),("video","request_id"),("video","id")))
         if not isinstance(task_id,str) or not task_id or len(task_id)>512 or not re.fullmatch(r'[A-Za-z0-9_./:-]+',task_id):
-            raise TransportError("提交后没有有效任务 ID；必须按未知状态恢复，不能重新提交")
+            raise TransportError("提交后没有有效任务 ID；禁止重发；" + summary(result, self.key))
         task={'id':task_id}
         if p == 'fal':
             for k in ('status_url','response_url'):
@@ -144,7 +155,7 @@ class Adapter:
     def poll(self, task):
         p=self.provider; ident=urllib.parse.quote(task['id'],safe='')
         paths={'aliyun':'/api/v1/tasks/'+ident,'minimax':'/v2/query/video_generation/'+ident,
-               'volcengine':'/api/v3/contents/generations/tasks/'+ident,'91topgo':'/v1/videos/'+ident}
+               'volcengine':'/api/v3/contents/generations/tasks/'+ident,'aihge':'/v1/videos/'+ident,'91topgo':'/v1/videos/'+ident}
         if p=='fal': path=task['status_url']
         elif p=='google':
             if not re.fullmatch(r'[A-Za-z0-9_./-]+',task['id']) or '..' in task['id']: raise ValueError('无效 operation 名称')
@@ -171,9 +182,9 @@ class Adapter:
             from provider import extract_video_url
             status=result.get('status',''); url=extract_video_url(result)
             if url:url=urllib.parse.urljoin(self.base+'/',url)
-            if not url and status in {'completed','succeeded'}: url=self.base+'/v1/videos/'+ident+'/content'
+            if not url and status in {'completed','succeeded','done'}: url=self.base+'/v1/videos/'+ident+'/content'
         status=str(status).lower()
-        if status in {'succeeded','completed','success'}: state='succeeded'
+        if status in {'succeeded','completed','success','done'}: state='succeeded'
         elif status in {'failed','cancelled','canceled','error'}: state='failed'
         elif status not in {'pending','queued','running','in_queue','in_progress','processing','submitted'}:
             raise TransportError('未知任务状态，请保留任务 ID 并查询服务商')

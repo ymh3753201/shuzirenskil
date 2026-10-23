@@ -57,6 +57,7 @@ def install(project: Path) -> Path:
     if missing:
         print("制作视频前还需安装并配置到 PATH：" + "、".join(missing))
     print("本次安装离线执行，没有调用付费接口；视频制作需要你自己的账号和配置。")
+    print("下一步：请让 Codex 读取 Skill 的 references/setup-and-troubleshooting.md，完成系统凭据库保存及回读检查。")
     return target
 
 
