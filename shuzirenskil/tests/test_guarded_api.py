@@ -500,8 +500,9 @@ class GuardedApiTests(unittest.TestCase):
         self.run_cli(project, "preflight", "--config", str(self.config_path))
         self.run_cli(project, "submit", "--timeout", "3", api_key=True)
         self.assertEqual(FakeHandler.payloads[0]["image"], {"file_id": "file_test_1"})
-        ledger_mode = (project / "provider-upload-ledger.json").stat().st_mode & 0o777
-        self.assertEqual(ledger_mode, 0o600)
+        if os.name != 'nt':  # Windows uses NTFS ACLs, not POSIX mode bits.
+            ledger_mode = (project / "provider-upload-ledger.json").stat().st_mode & 0o777
+            self.assertEqual(ledger_mode, 0o600)
 
     def test_unknown_file_upload_result_is_not_retried(self) -> None:
         project = self.root / "unknown-file-upload-project"

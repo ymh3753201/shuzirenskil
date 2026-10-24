@@ -215,14 +215,19 @@ class MediaPipelineTests(unittest.TestCase):
 
     def test_stitch_accepts_relative_project_paths(self) -> None:
         cwd = Path.cwd()
-        clip = Path(os.path.relpath(self.video, cwd))
-        output = Path(os.path.relpath(self.root / "relative-output.mp4", cwd))
-        work = Path(os.path.relpath(self.root / "relative-work", cwd))
-        report = stitch([clip], output, work, "9:16")
-        self.assertTrue(output.is_file())
-        self.assertTrue(report["output"]["has_audio"])
-        concat_text = (work / "concat.txt").read_text(encoding="utf-8")
-        self.assertIn(str((work / "normalized" / "clip_001.mkv").resolve()), concat_text)
+        try:
+            # A Windows temporary directory may be on a different drive.
+            os.chdir(self.root)
+            clip = Path(self.video.name)
+            output = Path('relative-output.mp4')
+            work = Path('relative-work')
+            report = stitch([clip], output, work, "9:16")
+            self.assertTrue(output.is_file())
+            self.assertTrue(report["output"]["has_audio"])
+            concat_text = (work / "concat.txt").read_text(encoding="utf-8")
+            self.assertIn((work / "normalized" / "clip_001.mkv").resolve().as_posix(), concat_text)
+        finally:
+            os.chdir(cwd)
 
     def test_long_silent_tails_are_trimmed_before_stitching(self) -> None:
         clips: list[Path] = []
