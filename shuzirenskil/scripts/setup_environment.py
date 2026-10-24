@@ -45,6 +45,8 @@ def setup(skip_model=False, offline_cache=None):
             verify_cache(cache, python)
             args += ['--no-index', '--find-links', cache/'wheels']
         run(args)
+        # Catch platform-specific DLL/import failures before the large model download.
+        run([python, '-c', 'import faster_whisper; from faster_whisper.vad import get_vad_model; get_vad_model()'])
         ffmpeg, ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
         if not (ffmpeg and ffprobe):
             if cache:

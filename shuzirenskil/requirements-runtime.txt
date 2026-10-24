@@ -1,5 +1,7 @@
 # Dedicated CPU environment. No external text model and no cloud transcription.
 faster-whisper==1.2.1
+# CTranslate2 4.6 on Windows still imports pkg_resources.
+setuptools==80.9.0
 av==16.0.1
 ctranslate2==4.6.0
 onnxruntime==1.23.2
