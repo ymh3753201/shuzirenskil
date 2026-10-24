@@ -22,3 +22,7 @@ jobs:
         run: python -B -m unittest discover -s shuzirenskil/tests -v
       - name: Run installer regression
         run: python -B -m unittest discover -s tests -v
+      - name: Download public speech model and verify actual offline inference
+        run: |
+          python -B shuzirenskil/scripts/setup_environment.py
+          python -B shuzirenskil/scripts/run.py doctor --self-test

@@ -78,7 +78,7 @@ def setup(skip_model=False, offline_cache=None):
         # Do not resolve a venv Python symlink: its path selects the isolated environment.
         config['python'] = str(python.absolute())
         atomic_write_json(root/'runtime.json', config)
-        freeze = subprocess.check_output([python, '-m', 'pip', 'freeze'], text=True)
+        freeze = subprocess.check_output([python, '-m', 'pip', 'freeze'], text=True, encoding="utf-8")
         (root/'installed-requirements.txt').write_text(freeze, encoding='utf-8')
         print(json.dumps(config, ensure_ascii=False, indent=2))
         return config
@@ -91,7 +91,7 @@ def verify_cache(cache, python=None):
         raise ValueError('缓存文件清单或识别模型版本不匹配')
     if (manifest['platform'], manifest['machine'], manifest['python']) != (platform.system(), platform.machine(), '3.12'):
         raise ValueError('缓存仅适用于标注的系统、CPU 和 Python 3.12；不要跨系统复用')
-    if python and subprocess.check_output([str(python),'-c','import sys; print("%d.%d"%sys.version_info[:2])'],text=True).strip() != manifest['python']:
+    if python and subprocess.check_output([str(python),'-c','import sys; print("%d.%d"%sys.version_info[:2])'],text=True, encoding="utf-8").strip() != manifest['python']:
         raise ValueError('运行环境 Python 版本与依赖缓存不符')
     for relative, digest in manifest['files'].items():
         path = cache/relative
@@ -105,7 +105,7 @@ def export_cache(destination):
     config = json.loads((root/'runtime.json').read_text(encoding='utf-8'))
     destination = Path(destination).resolve()
     destination.mkdir(parents=True, exist_ok=False)
-    version = subprocess.check_output([config['python'], '-c', 'import sys;print("%d.%d"%sys.version_info[:2])'], text=True).strip()
+    version = subprocess.check_output([config['python'], '-c', 'import sys;print("%d.%d"%sys.version_info[:2])'], text=True, encoding="utf-8").strip()
     if version != '3.12':
         raise ValueError('当前导出缓存仅支持 Python 3.12；使用该版本创建环境后再导出')
     run([config['python'], '-m', 'pip', 'download', '--only-binary=:all:',

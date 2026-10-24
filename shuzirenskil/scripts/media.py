@@ -21,7 +21,7 @@ def require_command(name: str) -> str:
 
 
 def run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=True, text=True, capture_output=True)
+    return subprocess.run(command, check=True, text=True, encoding="utf-8", capture_output=True)
 
 
 def probe(path: Path) -> dict[str, Any]:
@@ -76,7 +76,7 @@ def detect_tail_silence(path: Path, noise_db: str = "-35dB", min_duration: float
     duration = technical_summary(path)["duration_seconds"]
     result = subprocess.run(
         [ffmpeg, "-hide_banner", "-xerror", "-i", str(path), "-map", "0:a:0", "-af", f"silencedetect=noise={noise_db}:d={min_duration}", "-f", "null", "-"],
-        text=True,
+        text=True, encoding="utf-8",
         capture_output=True,
         check=True,
     )
@@ -102,7 +102,7 @@ def analyze_speech_pacing(path: Path, script: str, planned_cpm: int) -> dict[str
     duration = technical_summary(path)["duration_seconds"]
     result = subprocess.run(
         [require_command("ffmpeg"), "-hide_banner", "-xerror", "-i", str(path), "-map", "0:a:0", "-af", "silencedetect=noise=-35dB:d=0.15", "-f", "null", "-"],
-        text=True, capture_output=True, check=True,
+        text=True, encoding="utf-8", capture_output=True, check=True,
     )
     log = result.stdout + "\n" + result.stderr
     starts = [float(item) for item in re.findall(r"silence_start:\s*([0-9.]+)", log)]

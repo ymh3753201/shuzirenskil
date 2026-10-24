@@ -48,7 +48,7 @@ def probe_command(name):
     if not path:
         return {'status': 'missing', 'path': None}
     try:
-        result = subprocess.run([path, '-version'], capture_output=True, text=True, timeout=15)
+        result = subprocess.run([path, '-version'], capture_output=True, text=True, encoding="utf-8", timeout=15)
         return {'status': 'available' if result.returncode == 0 else 'failed', 'path': path,
                 'version': result.stdout.splitlines()[0] if result.stdout else ''}
     except (OSError, subprocess.SubprocessError):
@@ -73,11 +73,13 @@ def capabilities():
     if python and Path(python).is_file() and model and Path(model, 'model.bin').is_file():
         try:
             code = 'import faster_whisper, onnxruntime; from faster_whisper.vad import get_vad_model; get_vad_model(); print(faster_whisper.__version__)'
-            result = subprocess.run([python, '-c', code], capture_output=True, text=True, timeout=45)
+            result = subprocess.run([python, '-c', code], capture_output=True, text=True, encoding="utf-8", timeout=45)
             report['speech_recognition'] = {'status': 'available' if result.returncode == 0 else 'failed',
                 'engine': 'faster-whisper', 'version': result.stdout.strip() if result.returncode == 0 else '',
                 'model': model, 'model_load_verified': False,
                 'note': '依赖/VAD 可加载，模型实际推理还需 doctor --self-test 验证'}
+            if result.returncode:
+                report['speech_recognition']['diagnostic']=result.stderr[-2000:]
         except (OSError, subprocess.SubprocessError):
             report['speech_recognition'] = {'status': 'failed', 'reason': '本地识别环境启动失败'}
     report['technical_ready'] = all(report[x]['status'] == 'available' for x in ('ffmpeg', 'ffprobe'))

@@ -44,7 +44,7 @@
   "text_review": {
     "manifest_file": "",
     "manifest_sha256": "",
-    "reviewer": "human_user",
+    "reviewer": null,
     "full_video_viewed": false,
     "all_sampled_frames_viewed": false,
     "last_frame_viewed": false,

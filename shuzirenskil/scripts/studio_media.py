@@ -115,7 +115,11 @@ def render(plan, clips, output, edits=None):
                          'frames':frames,'script':job['script'],'source_sha256':sha256_file(Path(path)),
                          'source_end_seconds':frames/fps,'tail_edit':None if locked else edit})
         cursor_frames+=frames
-    listing=output/'concat.txt';listing.write_text(''.join("file '"+p.name+"'\n" for p in files))
+    # Some FFmpeg builds report MKV duration as the last frame's start time.
+    # Bind concat offsets to counted frames, so no seam overlaps or drift occur.
+    listing=output/'concat.txt';listing.write_text(''.join(
+        "file '"+p.name+"'\nduration "+f"{part['frames']/fps:.12f}"+"\n"
+        for p,part in zip(files,timeline)),encoding='utf-8')
     joined=output/'joined.mkv'
     command(['ffmpeg','-v','error','-y','-f','concat','-safe','1','-i',str(listing),'-c','copy',str(joined)])
     final=output/'final.mp4';master_output=None

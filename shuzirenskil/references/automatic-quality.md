@@ -70,3 +70,5 @@ python3 scripts/run.py workflow --project-dir /实际项目 advance
 仓库和通用安装包携带完整源码、安装程序、固定依赖清单、模型来源版本和配置模板；不携带 API Key、私人作品或某台电脑的绝对配置。通用包默认联网安装，不能称为全平台离线包。
 
 可用 `setup_environment.py --export-cache /新缓存目录` 导出当前系统 Python 3.12 的全部依赖 wheel 和识别模型。缓存有文件校验和、系统/CPU 标签；离线使用 `--offline-cache`，须已经安装匹配的 Python 3.12、FFmpeg/ffprobe。缓存不包含 Python 或 FFmpeg，不跨系统使用，不把它宣传为完整离线环境。大文件放发布附件或安装包目录，不进 Git 源码历史。
+
+验收模板的 reviewer 初始为空，避免误导为“必须由用户审核”。执行者应按实际证据填写 agent_audiovisual、文字检查 agent_visual，或实际参与审核的 human_user；不能只改名称就放行。

@@ -59,8 +59,11 @@ def inspect_audio(video, output, script='', language=None, *, transcribe=True):
                 report['script_diff'] = list(difflib.ndiff(list(normalized(script)), list(normalized(text)))) if script else []
                 (output/'transcript.txt').write_text(text, encoding='utf-8')
                 report['status'] = 'automatic_checks_completed'
-            except (OSError, subprocess.SubprocessError, ValueError, KeyError):
-                report['recognition'] = {'status': 'failed', 'reason': '本地识别失败；检查 runtime/doctor，不能以确认稿代替识别'}
+            except (OSError, subprocess.SubprocessError, ValueError, KeyError) as exc:
+                diagnostic=getattr(exc,'stderr',None) or str(exc)
+                if isinstance(diagnostic,bytes):diagnostic=diagnostic.decode('utf-8',errors='replace')
+                report['recognition'] = {'status': 'failed', 'reason': '本地识别失败；检查 runtime/doctor，不能以确认稿代替识别',
+                                         'error_type':type(exc).__name__,'diagnostic':diagnostic[-2000:]}
     atomic_write_json(output/'audio-qc.json', report)
     return report
 
