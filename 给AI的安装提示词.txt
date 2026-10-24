@@ -1,0 +1,10 @@
+请在我的视频项目安装这份 shuzirenskil。我是零基础，请直接操作，简单汇报。
+
+完整解压后的安装包目录：【填写本机路径】
+视频项目目录：【填写；没有请先帮我创建】
+
+先读安装和使用说明.md 和 shuzirenskil/SKILL.md，识别 Windows/macOS，检查 Python 3.10+、FFmpeg、ffprobe。核对文件后，用包内 install.py 安装到项目的 .agents/skills/shuzirenskil；已有版本先备份，保留配置和素材，不直接覆盖。
+
+按 references/setup-and-troubleshooting.md 准备系统凭据库。服务资料只问缺少的信息，密钥由我在本机隐藏输入；保存后回读并用新进程验证，不显示密钥，也不把空 .env 当作配置完成。
+
+本次只安装和配置，不上传私人素材或生成图片、视频。最后告诉我版本、安装位置、已通过和待补的检查；需要新开 Codex 会话就告诉我。

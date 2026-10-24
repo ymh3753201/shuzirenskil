@@ -2,6 +2,8 @@
 
 上线审查修订版：当前为**受控试用**，不是全模型正式验收。修复了旧流程转写匹配过宽、媒体分析失败未阻断及旧验收沿用问题；拼接后自动报告时长是否达标。测试范围及正式上线清单见 [上线验收范围](references/release-readiness.md)。原有视频不自动重生成，旧版最终质检须对现有文件重新执行。
 
+2026-10-24 安装修订：系统凭据库、分服务商接口合同、Seedance 2.0 与 AI 跃云独立适配已加入；真实验证范围分别记录。
+
 2026-10-18 升级开发：新增完整多模型执行入口 `scripts/studio.py`，接通 Wan 3、MiniMax H3/H3 Max、Seedance 2.5、Veo 3.1、91topgo 与独立 fal 口型处理。支持可选音频参考、主音轨、长片续接、混合广告分镜、恢复与验收交付；MikuAPI 保留旧入口。本地代码和模拟接口测试通过，真实账号/生成质量仍须试片。先读 [执行指南](references/studio-execution.md) 与 [声音和规划](references/multimodel-production.md)。
 
 公开分享版：仓库只包含 Skill 代码和空白配置示例。视频服务商账号仍须使用者自己准备；使用 Codex 内置生图或已有图片时，无须配置第三方图片 API。不要把填好的 `.env` 上传到 GitHub、飞书或聊天窗口。
@@ -13,31 +15,29 @@
 
 这是一个给普通用户使用的 Codex 数字人口播视频 Skill。它先分析主题、稿件、PPT、文档、人物图、音频、字幕或已有视频，再让用户确认完整方案和正式参考图，最后才可能调用付费视频接口。
 
-## 安装要求
+## 安装与密钥配置
 
-- Python 3.10 或更高版本
-- FFmpeg 和 ffprobe
-- 需要自动字幕时：`whisper-cli` 和本地 Whisper 模型
-- 视频制作时：默认首选 91topgo，Key 放入 macOS 钥匙串服务 `shuzirenskil-91topgo-video` 或 `SHUZIRENSKIL_91TOPGO_API_KEY`；MikuAPI 仅显式降级，使用 `shuzirenskil-mikuapi-video` 或 `SHUZIRENSKIL_MIKUAPI_API_KEY`。旧的通用变量 `SHUZIRENSKIL_API_KEY` 不再被视频流程读取，避免把两家服务商的密钥混用。
-- 图片优先使用当前 Codex 会话可用的内置 `image_gen`；也可使用自备图片。只有选择第三方路线时才配置 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`，模型为 `gpt-image-2`
+从完整仓库或分享包安装，推荐使用包内 `install.py`。安装位置为视频项目的 `.agents/skills/shuzirenskil`，已有同名目录不会覆盖。不要只复制 `SKILL.md`。
 
-不要把 API Key 写进 Skill 目录、项目记录、日志或打包文件。macOS 本机推荐使用钥匙串；临时开发 Key 才放在项目根目录私密 `.env`。
+首次安装先读 [配置与排错指南](references/setup-and-troubleshooting.md)。安装需要 Python 3.10+，制作和完整媒体测试需要 FFmpeg/ffprobe；字幕、配音和对齐依赖按所选功能另装。
 
-## 本地 `.env` 配置
+新用户优先使用系统凭据库：Windows Credential Manager、macOS Keychain、Linux Secret Service。按指南在同一 Python 环境安装 keyring，通过 `credential_store.py set` 的本机隐藏输入保存，并单独运行 `status` 验证新进程可读。禁止把真实密钥写进命令参数、报告或分享包；凭据库不可用时明确说明，不自动改存明文。
 
-1. 把 `.env.example` 复制到具体制作项目目录，文件名改为 `.env`。
-2. 按视频服务商填写 `SHUZIRENSKIL_91TOPGO_API_KEY` 或 `SHUZIRENSKIL_MIKUAPI_API_KEY`。仅在选择第三方生图时填写图片用的 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`。视频密钥也可以只配置到对应的 macOS 钥匙串。
-3. 在 macOS 或 Linux 执行 `chmod 600 <项目目录>/.env`。脚本发现其他用户也能读取时会拒绝使用。
+旧环境变量、显式 `.env` 和已有 macOS 专用钥匙串继续兼容，可能优先于新凭据库，切换时须核对来源但不打印值。旧 `.env` 在 macOS/Linux 要求 600，Windows 使用 NTFS 权限控制。模板文件只表示配置格式，创建空文件不等于密钥已配置。
 
-macOS 钥匙串保存示例（不要把真实 Key 写进文档）：`security add-generic-password -U -a "$USER" -s shuzirenskil-91topgo-video -w '<API_KEY>'`。
+不同服务商使用各自专用变量和适配器，见 [执行指南](references/studio-execution.md)。图片优先使用 Codex 当前会话可用的内置生图或自备图片，只有第三方图片路线才需要额外配置。
 
-也可以用全局参数 `--env-file <私密文件路径>` 指定位置。如果该文件没有当前视频服务商的专用变量，脚本会使用该服务商的钥匙串；文件中的旧通用变量不会覆盖它。`check-provider` 只做免费连通性检查，不创建付费视频任务；`submit` 创建任务前还会免费核对凭据与目标模型，并要求已完成两次确认和免费预检。
+## 旧 Grok 入口的配置与传输
+
+本节仅适用于旧 `workflow.py` 的 91topgo/MikuAPI 路线。新入口、AI 跃云及其他模型分别按 [接口规范](references/provider-integration.md) 和对应执行指南操作，不继承下述默认服务商、15 秒限制或上传方式。
+
+旧视频变量为 `SHUZIRENSKIL_91TOPGO_API_KEY` 或 `SHUZIRENSKIL_MIKUAPI_API_KEY`，不读取旧通用变量 `SHUZIRENSKIL_API_KEY`。macOS 原专用钥匙串保留。`--env-file` 明确指定私密文件；专用变量缺失时的回退规则见配置指南。`check-provider` 只进行已登记的免费检查，模型列表可见不代表真实生成已验证。
 
 本地生成的参考图不需要先上传到公共图床。Codex 内置图片保存为本地文件后，运行 `bind-generated-image --image-file <图片> --prompt-file <已确认提示词>`；第三方图片走 `generate-image`；已有图片走 `bind-image`。绑定后的本地图片在 91topgo 请求前压缩为 JPEG Data URI。只有明确选择 `--input-transport provider-file` 才会走旧的 Provider 文件上传流程。
 
 91topgo 当前使用 `POST /v1/videos` 创建、`GET /v1/videos/{id}` 查询，时长字段为字符串 `seconds`。参考图使用 `reference_images`；本地生成图会压缩成不超过 800000 字节的 JPEG Data URI，直接放进视频请求，不依赖图片上传接口。已完成一次 1 秒纯文本链路验证，并复用带货视频 Skill 已验收的 91topgo 参考图合同。Provider 付费 POST 失败或状态不明时不会自动切换到 MikuAPI；需要在提交前显式选择 `--provider mikuapi`。
 
-## 安全默认值
+## 旧 Grok 入口默认值与验收要求
 
 - 默认中文、9:16、720p、无字幕、无额外特效。
 - 没有当前任务中的明确授权时，不调用真实视频接口。

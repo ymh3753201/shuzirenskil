@@ -3,7 +3,7 @@
   "algorithm": "sha256",
   "files": {
     "shuzirenskil/.env.example": "d254b50539130e0215c314f543d2e515944fce978210c5631ef2e9bfbfb7dc0b",
-    "shuzirenskil/README.md": "63613b47fd2a0fff6a2a793b6bc6a1f8fe4aa5a33ffd28930bcc198a164454ff",
+    "shuzirenskil/README.md": "812f0c8dff3fd8b6251200607bd44fbb76d7da8a00cad73f7fe88df3083f6d9b",
     "shuzirenskil/SKILL.md": "34fd348e681846b14470000add43eeec4390341b54e561aab94a799bb3e78581",
     "shuzirenskil/assets/ad-review-template.json": "9e1b2b55b8662aaa588f4b7d755c6e4c1bb13b8ca5e5f9c50d4537732801db99",
     "shuzirenskil/assets/ad-video-prompt-spec-template.json": "61bd5475e9e1c56733499746746ed999dd5a46dafbb8ed77c0ac2748246fc7ab",
