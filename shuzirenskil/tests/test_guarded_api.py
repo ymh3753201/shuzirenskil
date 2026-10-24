@@ -389,7 +389,9 @@ class GuardedApiTests(unittest.TestCase):
         self.run_cli(project, "review-pilot", "--evidence-file", str(evidence))
         self.assertTrue(list((project / "review-history").glob("pilot-review-*.json")))
         self.assertEqual(FakeHandler.post_count, 1)
-        self.run_cli(project, "submit", "--timeout", "3", api_key=True)
+        self.run_cli(project, "advance", api_key=True)
+        self.assertEqual(json.loads((project / 'project.json').read_text(encoding='utf-8'))['state']['stage'], 'clean_candidate_ready')
+        self.run_cli(project, "advance", api_key=True)
         self.assertEqual(FakeHandler.post_count, count)
 
     def test_reference_mode_builds_multi_image_and_preset_voice_payload(self) -> None:

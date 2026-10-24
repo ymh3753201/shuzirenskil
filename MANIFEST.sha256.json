@@ -71,7 +71,7 @@
     "shuzirenskil/tests/test_ad_contract.py": "f50ebe4b908b57de2e1333ea970c4ce9db345f34c293f5dac549c2d384827f0c",
     "shuzirenskil/tests/test_automatic_quality.py": "6cd1fa2801bffd1b5d0a991e46f896b10c0a7ae1b672d1fcef2f18fa31fbdb72",
     "shuzirenskil/tests/test_compatibility_upgrade.py": "2d10baea7dd469b6309879b00d06fccf7cc47a391f2b7e4414a29571639ea093",
-    "shuzirenskil/tests/test_guarded_api.py": "683d17ed866f766ec8a6879113d8a7893625aae87e01a6e9d21c71c7ec110a6e",
+    "shuzirenskil/tests/test_guarded_api.py": "f3cd14c99d3511940874654f584e001b1759cfd9b10e27f83e35c296d48ccc45",
     "shuzirenskil/tests/test_image_provider.py": "c21bc668a5ec47c6e543f2390580b982a2cb9e1896e5a705e10b16e671c6e60f",
     "shuzirenskil/tests/test_media_pipeline.py": "feecc8a4713b3b3a080c7b9954fd56054b34e9dbbdb17fdf159ed9d4671c19af",
     "shuzirenskil/tests/test_natural_duration.py": "efe0e8047885cf13f3e0a654f711c883d72f24dd7411441666893ee9ca81f65a",
