@@ -123,7 +123,7 @@ def main():
     script = args.script_file.read_text(encoding='utf-8-sig') if args.script_file else ''
     result = inspect_audio(args.video, args.output, script, args.language, transcribe=not args.no_asr)
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 1 if result['status'] == 'blocked' else 0
+    return 0 if result['status'] == 'automatic_checks_completed' else (1 if result['status'] == 'blocked' else 2)
 
 
 if __name__ == '__main__':

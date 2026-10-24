@@ -151,7 +151,7 @@ class GuardedApiTests(unittest.TestCase):
             text=True,
             capture_output=True,
             env=env,
-        )
+        encoding="utf-8")
         self.assertEqual(result.returncode, expect, result.stdout + result.stderr)
         return result
 
@@ -201,21 +201,21 @@ class GuardedApiTests(unittest.TestCase):
         spec = designed_voice_spec()
         spec["performance_beats"] = [{"segment_index": segment["index"], "trigger_phrase": segment["script"][:4], "expression": "短暂轻轻微笑"} for segment in plan["segments"]]
         spec_path = self.root / "voice-spec.json"
-        spec_path.write_text(json.dumps(spec, ensure_ascii=False))
+        spec_path.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
         self.run_cli(project, "prepare", "--name", "voice", "--script-file", str(self.script), "--video-prompt-spec", str(spec_path))
         self.run_cli(project, "confirm-plan", "--approved-by", "user")
         self.run_cli(project, "bind-image", "--image", str(self.image), "--continuity-spec", str(self.continuity), "--provider-image-url", self.provider_image_url)
         auth = ("authorize", "--approved-by", "user", "--confirmation-intent", "confirm_images_and_start", "--max-paid-submissions", str(len(plan["segments"])), "--acknowledge-long-video-risk")
         result = self.run_cli(project, *auth, expect=1)
         self.assertIn("没有绑定当前图片", result.stderr)
-        saved = json.loads((project / "project.json").read_text())
+        saved = json.loads((project / "project.json").read_text(encoding="utf-8"))
         evidence = {"canonical_sha256": saved["canonical_reference"]["sha256"], "image_set_digest": saved["image_set_digest"], "voice_signature": saved["settings"]["voice_signature"], "casting_fit": "pass", "reference_text_free": "pass", "visible_observations": "测试夹具为合成图片，模拟读取实际形象。", "casting_observations": "模拟根据讲解角色选取清亮偏薄的声线。", "reference_text_observations": "测试夹具模拟检查生产图片没有文字。"}
         evidence_path = self.root / "character.json"
-        evidence_path.write_text(json.dumps(evidence, ensure_ascii=False))
+        evidence_path.write_text(json.dumps(evidence, ensure_ascii=False), encoding="utf-8")
         self.run_cli(project, "review-character", "--evidence-file", str(evidence_path))
         self.run_cli(project, *auth)
         self.run_cli(project, "preflight", "--config", str(self.config_path))
-        contract = json.loads((project / "production-contract.json").read_text())
+        contract = json.loads((project / "production-contract.json").read_text(encoding="utf-8"))
         self.assertGreater(len(contract["dry_requests"]), 1)
         for request in contract["dry_requests"]:
             self.assertIn(spec["voice_casting"]["resonance"], request["payload"]["prompt"])
@@ -585,11 +585,16 @@ class GuardedApiTests(unittest.TestCase):
         self.assertEqual(FakeHandler.request_headers[-1].get("Accept"), "application/json")
         self.assertTrue(FakeHandler.request_headers[-1].get("User-Agent", "").startswith("shuzirenskil/"))
 
-    def test_insecure_dotenv_is_rejected_without_network(self) -> None:
+    def test_unsupported_private_file_is_rejected_without_network(self) -> None:
         project = self.root / "provider-check"
         env_file = self.root / ".env"
         env_file.write_text("SHUZIRENSKIL_MIKUAPI_API_KEY=test-only-not-a-real-key\n", encoding="utf-8")
-        env_file.chmod(0o644)
+        if os.name == 'nt':
+            # Windows has no POSIX chmod mode; exercise its regular-file guard.
+            env_file.unlink()
+            env_file.mkdir()
+        else:
+            env_file.chmod(0o644)
         self.run_cli(
             project, "check-provider", "--config", str(self.config_path), "--timeout", "3",
             env_file=env_file, expect=1,

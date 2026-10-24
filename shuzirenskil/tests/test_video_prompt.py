@@ -17,7 +17,7 @@ class VideoPromptTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "voice_casting"):
             require_voice_casting(spec)
         import json
-        spec = json.loads((SCRIPTS.parent / "assets/video-prompt-spec-template.json").read_text())
+        spec = json.loads((SCRIPTS.parent / "assets/video-prompt-spec-template.json").read_text(encoding="utf-8"))
         with self.assertRaisesRegex(ValueError, "占位符"):
             require_voice_casting(spec)
 

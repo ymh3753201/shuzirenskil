@@ -38,7 +38,7 @@ class InstallTests(unittest.TestCase):
     def test_install_exact_files_to_unicode_project(self):
         with contextlib.redirect_stdout(io.StringIO()):
             installer.install(self.project)
-        manifest = json.loads((self.package/'MANIFEST.sha256.json').read_text())['files']
+        manifest = json.loads((self.package/'MANIFEST.sha256.json').read_text(encoding="utf-8"))['files']
         for name, digest in manifest.items():
             installed = self.target/Path(name).relative_to('shuzirenskil')
             self.assertEqual(hashlib.sha256(installed.read_bytes()).hexdigest(), digest)
@@ -46,13 +46,13 @@ class InstallTests(unittest.TestCase):
     def test_existing_skill_is_preserved(self):
         self.target.mkdir(parents=True)
         original = self.target/'user-file.txt'
-        original.write_text('keep me')
+        original.write_text('keep me', encoding="utf-8")
         with self.assertRaisesRegex(ValueError, '已有同名'):
             installer.install(self.project)
-        self.assertEqual(original.read_text(), 'keep me')
+        self.assertEqual(original.read_text(encoding="utf-8"), 'keep me')
 
     def test_changed_package_is_rejected_before_install(self):
-        (self.package/'shuzirenskil/SKILL.md').write_text('changed')
+        (self.package/'shuzirenskil/SKILL.md').write_text('changed', encoding="utf-8")
         with self.assertRaisesRegex(ValueError, '校验失败'):
             installer.install(self.project)
         self.assertFalse(self.target.exists())

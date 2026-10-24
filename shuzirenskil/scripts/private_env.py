@@ -59,7 +59,7 @@ def _keychain_value(service: str) -> str:
             capture_output=True,
             timeout=5,
             check=False,
-        )
+        encoding="utf-8")
     except (OSError, subprocess.SubprocessError):
         return ""
     return result.stdout.strip() if result.returncode == 0 else ""

@@ -55,7 +55,7 @@ def setup(skip_model=False, offline_cache=None):
                     'from pathlib import Path; import sys; '
                     'Path(sys.argv[1]).write_text(json.dumps(get_or_fetch_platform_executables_else_raise()))')
             run([python, '-c', code, result_file])
-            ffmpeg, ffprobe = json.loads(result_file.read_text())
+            ffmpeg, ffprobe = json.loads(result_file.read_text(encoding="utf-8"))
         model = root/'models/faster-whisper-small'
         if not skip_model:
             if cache:

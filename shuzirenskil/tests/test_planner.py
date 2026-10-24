@@ -32,7 +32,7 @@ class PlannerTests(unittest.TestCase):
             result = subprocess.run([
                 sys.executable, str(WORKFLOW), "--project-dir", str(root / "missing"),
                 "prepare", "--name", "missing", "--script-file", str(script), "--duration", "15",
-            ], text=True, capture_output=True)
+            ], text=True, capture_output=True, encoding="utf-8")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("必须提供逐段表演方案", result.stderr)
             result = subprocess.run([
@@ -40,7 +40,7 @@ class PlannerTests(unittest.TestCase):
                 "prepare", "--name", "valid", "--script-file", str(script), "--duration", "15",
                 "--duration-mode", "content-fit",
                 "--video-prompt-spec", str(spec_path),
-            ], text=True, capture_output=True)
+            ], text=True, capture_output=True, encoding="utf-8")
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_underfilled_exact_copy_is_blocked_before_paid_work(self) -> None:
@@ -52,7 +52,7 @@ class PlannerTests(unittest.TestCase):
             spec["performance_beats"] = [{"segment_index": 1, "trigger_phrase": "做网页", "expression": "短暂强调"}]
             spec_path = root / "prompt.json"
             spec_path.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
-            result = subprocess.run([sys.executable, str(WORKFLOW), "--project-dir", str(root / "project"), "prepare", "--name", "pacing", "--script-file", str(script), "--duration", "15", "--duration-mode", "exact", "--video-prompt-spec", str(spec_path)], text=True, capture_output=True)
+            result = subprocess.run([sys.executable, str(WORKFLOW), "--project-dir", str(root / "project"), "prepare", "--name", "pacing", "--script-file", str(script), "--duration", "15", "--duration-mode", "exact", "--video-prompt-spec", str(spec_path)], text=True, capture_output=True, encoding="utf-8")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("不用慢读凑时长", result.stderr)
 
@@ -66,7 +66,7 @@ class PlannerTests(unittest.TestCase):
             spec["performance_beats"] = [{"segment_index": 1, "trigger_phrase": "做网页", "expression": "短暂强调"}]
             spec_path = root / "prompt.json"
             spec_path.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
-            result = subprocess.run([sys.executable, str(WORKFLOW), "--project-dir", str(root / "project"), "prepare", "--name", "pacing", "--script-file", str(script), "--duration", "15", "--video-prompt-spec", str(spec_path)], text=True, capture_output=True)
+            result = subprocess.run([sys.executable, str(WORKFLOW), "--project-dir", str(root / "project"), "prepare", "--name", "pacing", "--script-file", str(script), "--duration", "15", "--video-prompt-spec", str(spec_path)], text=True, capture_output=True, encoding="utf-8")
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("固定秒数分配", result.stderr)
 
@@ -93,7 +93,7 @@ class PlannerTests(unittest.TestCase):
                 text=True,
                 capture_output=True,
                 check=True,
-            )
+            encoding="utf-8")
             plan = json.loads(result.stdout)["plan"]
             self.assertTrue(plan["duration_capability_test"])
             self.assertEqual(plan["segments"][0]["request_seconds"], 15)
@@ -226,7 +226,7 @@ class PlannerTests(unittest.TestCase):
             root = Path(temp_dir)
             script = root / "script.txt"
             script.write_text("今天教你一个省时间的方法。", encoding="utf-8")
-            result = subprocess.run([sys.executable, str(WORKFLOW), "plan", "--script-file", str(script)], text=True, capture_output=True)
+            result = subprocess.run([sys.executable, str(WORKFLOW), "plan", "--script-file", str(script)], text=True, capture_output=True, encoding="utf-8")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["duration_source"], "content_estimate")
             self.assertEqual(sorted(path.name for path in root.iterdir()), ["script.txt"])
@@ -235,9 +235,9 @@ class PlannerTests(unittest.TestCase):
             spec_path = root / "prompt.json"
             spec_path.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
             project = root / "project"
-            result = subprocess.run([sys.executable, str(WORKFLOW), "--project-dir", str(project), "prepare", "--name", "content", "--script-file", str(script), "--video-prompt-spec", str(spec_path)], text=True, capture_output=True)
+            result = subprocess.run([sys.executable, str(WORKFLOW), "--project-dir", str(project), "prepare", "--name", "content", "--script-file", str(script), "--video-prompt-spec", str(spec_path)], text=True, capture_output=True, encoding="utf-8")
             self.assertEqual(result.returncode, 0, result.stderr)
-            result = subprocess.run([sys.executable, str(WORKFLOW), "--project-dir", str(project), "confirm-plan", "--approved-by", "user"], text=True, capture_output=True)
+            result = subprocess.run([sys.executable, str(WORKFLOW), "--project-dir", str(project), "confirm-plan", "--approved-by", "user"], text=True, capture_output=True, encoding="utf-8")
             self.assertEqual(result.returncode, 0, result.stderr)
 
 

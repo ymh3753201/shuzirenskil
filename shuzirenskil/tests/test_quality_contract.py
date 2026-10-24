@@ -59,7 +59,7 @@ class TextReviewTests(unittest.TestCase):
         other.write_bytes(self.video.read_bytes() + b"different")
         with self.assertRaisesRegex(ValueError, "视频不一致"):
             validate_text_review(self.evidence, other)
-        manifest = json.loads(self.manifest.read_text())
+        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
         Path(manifest["frames"][-1]["path"]).write_bytes(b"changed")
         with self.assertRaisesRegex(ValueError, "画面文件发生变化"):
             validate_text_review(self.evidence, self.video)

@@ -25,7 +25,7 @@ def tts(spec):
     repo=Path(spec['repo']).resolve();model_path=Path(spec['model_dir']).resolve();dest=Path(spec['output']).resolve()
     if not (repo/'cosyvoice/cli/cosyvoice.py').is_file() or not model_path.is_dir():raise ValueError('请先部署 CosyVoice 源码及本地模型目录')
     if dest.exists():raise ValueError('输出已存在，不覆盖已确认音轨')
-    script=Path(spec['script_file']).read_text().strip()
+    script=Path(spec['script_file']).read_text(encoding="utf-8").strip()
     if not script:raise ValueError('口播稿为空')
     offline();sys.path[:0]=[str(repo),str(repo/'third_party/Matcha-TTS')]
     from cosyvoice.cli.cosyvoice import AutoModel
@@ -78,7 +78,7 @@ def alignment_to_cues(result,script):
 def align(spec):
     audio=Path(spec['audio']).resolve();master=master_info(audio);model_path=Path(spec['model_dir']).resolve()
     if not model_path.is_dir():raise ValueError('必须提供已部署的本地 WhisperX 对齐模型目录')
-    script=Path(spec['script_file']).read_text().strip();out=Path(spec['output'])
+    script=Path(spec['script_file']).read_text(encoding="utf-8").strip();out=Path(spec['output'])
     if out.exists():raise ValueError('输出已存在，请保留旧时间码')
     blocks=spec.get('blocks')
     if blocks is None:

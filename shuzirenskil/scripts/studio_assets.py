@@ -25,7 +25,7 @@ def load_bindings(path):
     path=Path(path)
     if path.is_symlink() or path.stat().st_mode & 0o077:
         raise ValueError('素材地址文件应为非符号链接的 600 权限文件')
-    obj=json.loads(path.read_text())
+    obj=json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(obj,dict):raise ValueError('素材绑定必须为 JSON 对象')
     return obj
 

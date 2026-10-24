@@ -64,7 +64,7 @@ class ImageProviderTests(unittest.TestCase):
         cli_args = list(args)
         if cli_args and cli_args[0] == "prepare" and "--video-prompt-spec" not in cli_args:
             cli_args.append("--allow-legacy-performance-plan")
-        result = subprocess.run([*command, *cli_args], text=True, capture_output=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        result = subprocess.run([*command, *cli_args], text=True, capture_output=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, encoding="utf-8")
         self.assertEqual(result.returncode, expect, result.stdout + result.stderr)
         return result
 

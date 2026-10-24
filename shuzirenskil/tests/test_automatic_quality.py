@@ -118,7 +118,7 @@ class AdvanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'裁尾证据'):s.verify_accepted('segment_0001')
     def test_pending_check_never_advances_next_paid_job(self):
         f=self.fixture;s=f.prepare();f.approve(s);result=s.advance()
-        e=json.loads(Path(result['review_template']).read_text());e['full_playback']=True;e['review_seconds']=4
+        e=json.loads(Path(result['review_template']).read_text(encoding="utf-8"));e['full_playback']=True;e['review_seconds']=4
         with self.assertRaises(ValueError):s.review('segment_0001',e)
         self.assertEqual(len(f.remote.calls),1)
     def exercise_duration(self,seconds):
@@ -143,19 +143,25 @@ class AdvanceTests(unittest.TestCase):
 
 
 class EnvironmentTests(unittest.TestCase):
+    def test_chinese_cli_survives_ascii_output_environment(self):
+        script=Path(__file__).resolve().parents[1]/'scripts/validate_skill.py'
+        env={**os.environ,'PYTHONUTF8':'0','PYTHONIOENCODING':'ascii'}
+        result=subprocess.run([sys.executable,'-B',str(script)],env=env,capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('个必需文件',result.stdout.decode('utf-8'))
     def test_cache_verifies_files_platform_and_model_revision(self):
         from setup_environment import verify_cache, MODEL_REVISION
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/'fixture.whl').write_bytes(b'test')
             manifest={'platform':platform.system(),'machine':platform.machine(),'python':'3.12',
                       'model_revision':MODEL_REVISION,'files':{'fixture.whl':sha256_file(root/'fixture.whl')}}
-            (root/'CACHE.json').write_text(json.dumps(manifest)); verify_cache(root)
+            (root/'CACHE.json').write_text(json.dumps(manifest), encoding="utf-8"); verify_cache(root)
             (root/'unexpected.whl').write_bytes(b'changed')
             with self.assertRaises(ValueError):verify_cache(root)
             (root/'unexpected.whl').unlink();(root/'fixture.whl').write_bytes(b'changed')
             with self.assertRaises(ValueError):verify_cache(root)
             (root/'fixture.whl').write_bytes(b'test');manifest['platform']='different-system'
-            (root/'CACHE.json').write_text(json.dumps(manifest))
+            (root/'CACHE.json').write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaises(ValueError):verify_cache(root)
     def test_absent_runtime_does_not_claim_asr_or_perception(self):
         with patch('runtime_tools.settings',return_value={}):result=capabilities()

@@ -96,7 +96,7 @@ class MediaPipelineTests(unittest.TestCase):
             text=True,
             capture_output=True,
             env=env,
-        )
+        encoding="utf-8")
         self.assertEqual(result.returncode, expect, result.stdout + result.stderr)
         return result
 
@@ -184,7 +184,7 @@ class MediaPipelineTests(unittest.TestCase):
         self.run_cli(project, "stitch")
         self.review(project, "clean")
         manifest = project / "review-frames/clean/manifest.json"
-        frames = json.loads(manifest.read_text())["frames"]
+        frames = json.loads(manifest.read_text(encoding="utf-8"))["frames"]
         Path(frames[-1]["path"]).write_bytes(b"changed-after-review")
         result = self.run_cli(project, "finalize", expect=1)
         self.assertIn("画面文件发生变化", result.stderr)

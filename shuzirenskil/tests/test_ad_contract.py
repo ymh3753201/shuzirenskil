@@ -136,13 +136,13 @@ class AdContractTests(unittest.TestCase):
     def test_ad_cli_cannot_fall_back_to_legacy_or_omit_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
             script = Path(tmp) / "script.txt"
-            script.write_text("欢迎来到门店。")
+            script.write_text("欢迎来到门店。", encoding="utf-8")
             args = build_parser().parse_args(["--project-dir", str(Path(tmp)/"project"), "prepare", "--name", "test",
                                              "--purpose", "storefront_ad", "--script-file", str(script), "--allow-legacy-performance-plan"])
             with self.assertRaisesRegex(ValueError, "广告必须"):
                 command_prepare(args)
             specfile = Path(tmp) / "spec.json"
-            specfile.write_text(json.dumps(self.spec))
+            specfile.write_text(json.dumps(self.spec), encoding="utf-8")
             args.video_prompt_spec = specfile
             with self.assertRaisesRegex(ValueError, "绕过检查"):
                 command_prepare(args)
@@ -155,7 +155,7 @@ class AdContractTests(unittest.TestCase):
             video.write_bytes(b"video fixture")
             frame.write_bytes(b"frame fixture")
             manifest.write_text(json.dumps({"video_sha256": sha256_file(video), "sampling": "2fps_plus_dense_tail_and_exact_first_last",
-                "total_video_frames": 1, "frames": [{"path": str(frame), "sha256": sha256_file(frame), "roles": ["last"], "frame_index": 0}]}))
+                "total_video_frames": 1, "frames": [{"path": str(frame), "sha256": sha256_file(frame), "roles": ["last"], "frame_index": 0}]}), encoding="utf-8")
             review = {"manifest_file": str(manifest), "manifest_sha256": sha256_file(manifest), "reviewer": "agent_visual",
                 "full_video_viewed": True, "all_sampled_frames_viewed": True, "last_frame_viewed": True, "text_present": True,
                 "source_text_digest": digest_json(self.spec["ad_contract"]["source_text"]), "source_text_matches": "pass",

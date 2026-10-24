@@ -25,13 +25,13 @@ class ReleaseGateTests(unittest.TestCase):
                      'delivery_max_seconds': 45, 'delivery_duration_tolerance_seconds': 1.35}}
         self.args = argparse.Namespace(project_dir=self.root, evidence_file=self.root/'evidence.json')
         self.transcript = self.root/'transcript.txt'
-        self.args.evidence_file.write_text(json.dumps({'speech_transcript_file': str(self.transcript)}))
+        self.args.evidence_file.write_text(json.dumps({'speech_transcript_file': str(self.transcript)}), encoding="utf-8")
 
     def tearDown(self):
         self.temp.cleanup()
 
     def load_transcript(self, text):
-        self.transcript.write_text(text)
+        self.transcript.write_text(text, encoding="utf-8")
         with patch.object(workflow, 'load_project', return_value=self.project):
             return workflow._load_review_evidence('clean', self.args, {})
 
@@ -79,7 +79,7 @@ class ReleaseGateTests(unittest.TestCase):
              patch.object(workflow, 'stitch', return_value={'output': {'duration_seconds': 41.917}}), \
              patch('builtins.print'):
             workflow.command_stitch(self.args)
-        report = json.loads((self.root/'stitch-report.json').read_text())
+        report = json.loads((self.root/'stitch-report.json').read_text(encoding="utf-8"))
         self.assertFalse(report['duration_checks']['matches_exact_duration_intent'])
         self.assertEqual(self.project['state']['quality_status'], 'duration_failed_manual_review_pending')
 
