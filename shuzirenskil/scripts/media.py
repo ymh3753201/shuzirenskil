@@ -131,18 +131,28 @@ def analyze_speech_pacing(path: Path, script: str, planned_cpm: int) -> dict[str
     }
 
 
-def trim_tail_silence(path: Path, output: Path, work_dir: Path, keep_seconds: float = 0.3) -> dict[str, Any]:
+def trim_tail_silence(path: Path, output: Path, work_dir: Path, keep_seconds: float = 0.3, decision=None) -> dict[str, Any]:
     """只移除片段末尾连续静音，保留短暂自然收尾；中间停顿不会被处理。"""
     summary = technical_summary(path)
     silence = detect_tail_silence(path)
     tail = float(silence["tail_silence_seconds"])
-    if tail <= 0.6:
+    if decision is not None:
+        if decision.get('source_sha256') != sha256_file(path):
+            raise ValueError('裁尾记录与原片不匹配')
+        if not decision.get('trim'):
+            return {'source': str(path.resolve()), 'output': str(path.resolve()), 'trimmed': False, **silence, 'tail_edit': decision}
+        cut = decision['end_seconds']
+        if type(cut) not in (int, float) or not 0 < cut <= summary['duration_seconds']:
+            raise ValueError('裁尾边界无效')
+    else:
+        cut = None
+    if cut is None and tail <= 0.6:
         return {"source": str(path.resolve()), "output": str(path.resolve()), "trimmed": False, **silence}
     if tail >= summary["duration_seconds"] - 0.2:
         raise ValueError("片段没有足够的非静音内容，不能将整段静音裁成合格口播")
     start_value = silence["last_silence_start_seconds"]
     start = float(start_value if start_value is not None else summary["duration_seconds"])
-    trimmed_duration = max(0.1, min(summary["duration_seconds"], start + keep_seconds))
+    trimmed_duration = cut if cut is not None else max(0.1, min(summary["duration_seconds"], start + keep_seconds))
     ffmpeg = require_command("ffmpeg")
     output.parent.mkdir(parents=True, exist_ok=True)
     run([
@@ -159,6 +169,7 @@ def trim_tail_silence(path: Path, output: Path, work_dir: Path, keep_seconds: fl
         "trimmed_duration_seconds": result["duration_seconds"],
         "removed_tail_silence_seconds": round(max(0.0, summary["duration_seconds"] - result["duration_seconds"]), 3),
         **silence,
+        "tail_edit": decision,
     }
 
 
@@ -222,9 +233,11 @@ def _target_size(aspect_ratio: str) -> tuple[int, int]:
     raise ValueError(f"不支持的画幅: {aspect_ratio}")
 
 
-def stitch(clips: list[Path], output: Path, work_dir: Path, aspect_ratio: str) -> dict[str, Any]:
+def stitch(clips: list[Path], output: Path, work_dir: Path, aspect_ratio: str, edits=None) -> dict[str, Any]:
     if not clips:
         raise ValueError("没有可拼接片段")
+    if edits is not None and len(edits) != len(clips):
+        raise ValueError('裁尾证据数量与片段数量不符')
     ffmpeg = require_command("ffmpeg")
     width, height = _target_size(aspect_ratio)
     normalized_dir = work_dir / "normalized"
@@ -247,7 +260,7 @@ def stitch(clips: list[Path], output: Path, work_dir: Path, aspect_ratio: str) -
             raise ValueError("多段源视频帧率不同；需检查 Provider 原片，不能静默插帧拼接")
         source_frame_rate = rate
         trimmed_path = trimmed_dir / f"clip_{index:03d}.mp4"
-        trim_report = trim_tail_silence(clip, trimmed_path, trimmed_dir)
+        trim_report = trim_tail_silence(clip, trimmed_path, trimmed_dir, decision=edits[index-1] if edits is not None else None)
         tail_trim_reports.append(trim_report)
         source_for_normalize = Path(trim_report["output"])
         target = normalized_dir / f"clip_{index:03d}.mkv"

@@ -7,4 +7,4 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 export PYTHONDONTWRITEBYTECODE=1
-exec python3 -B "$PACKAGE_DIR/install.py" "$PROJECT_DIR"
+exec python3 -B "$PACKAGE_DIR/install.py" "$PROJECT_DIR" --with-runtime

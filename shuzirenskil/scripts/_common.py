@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
@@ -10,6 +9,14 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+from runtime_tools import activate
+
+activate()
+
+if os.name == 'nt':
+    import msvcrt
+else:
+    import fcntl
 
 
 def now_iso() -> str:
@@ -62,15 +69,28 @@ def require_file(path: Path, label: str) -> Path:
 def project_lock(project_dir: Path) -> Iterator[None]:
     project_dir.mkdir(parents=True, exist_ok=True)
     lock_path = project_dir / ".workflow.lock"
-    with lock_path.open("a+", encoding="utf-8") as handle:
+    with lock_path.open("a+b") as handle:
+        if os.name == 'nt':
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b'0')
+                handle.flush()
+            handle.seek(0)
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
+            if os.name == 'nt':
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
             raise RuntimeError("已有另一个制作流程正在操作这个项目") from exc
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if os.name == 'nt':
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def ensure_no_secret_text(value: Any, api_key: str | None = None) -> None:

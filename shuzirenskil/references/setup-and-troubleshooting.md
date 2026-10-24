@@ -1,6 +1,8 @@
 # 首次安装、密钥和接口检查
 
-先识别操作系统、当前项目、Python 3.10+、FFmpeg/ffprobe。Windows 检查 `py -3` 或 `python`，macOS/Linux 检查 `python3`；后续安装依赖与运行脚本必须使用同一个解释器。路径带空格或中文要正确引用。现有安装先备份，配置与素材不覆盖。
+先识别操作系统、当前项目、Python 3.10+、FFmpeg/ffprobe。Windows 检查 `py -3` 或 `python`，macOS/Linux 检查 `python3`；路径带空格或中文要正确引用。现有安装先备份，配置与素材不覆盖。
+
+rc6 推荐执行 `python scripts/setup_environment.py` 自动准备独立 Python 3.12、媒体工具、固定版本语音识别依赖与模型，再用 `python scripts/run.py doctor --self-test` 检查。后续凭据、制作、质检统一通过 `scripts/run.py` 进入同一隔离环境，不要求用户手动激活或编辑 PATH。首次会联网下载依赖/模型，不调用付费服务；详见 `automatic-quality.md`。文件安装、环境可用、实际账号权限和成片验收分别报告，不能统称“全部通过”。
 
 ## 密钥保存
 

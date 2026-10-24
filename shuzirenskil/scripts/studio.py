@@ -20,6 +20,8 @@ from ad_contract import VIDEO_CHECKS
 from studio_transport import Adapter, TransportError, replace_assets
 from studio_assets import load_bindings, resolve, unexpired, utc_stamp
 from studio_media import check_clip, context_clip, render, write_subtitles
+from audio_qc import inspect_audio, tail_decision, evidence_valid
+from runtime_tools import capabilities
 
 CHECKS=('identity','wardrobe_scene','motion','product_facts','visual_text','normal_speed_playback','continuity')
 AUDIO_CHECKS=('script_complete','voice_identity','voice_naturalness','lip_sync','pacing')
@@ -69,7 +71,7 @@ def prepare(spec_path, config_path, directory):
     plan=build_plan(read_json(spec_path),spec_path.resolve().parent)
     if any(j['request_preview']['payload'] is None for j in plan['jobs']):raise ValueError('此模型没有新执行适配器；请使用其旧入口或选择已接入模型')
     config=read_json(config_path);config_check(config,plan)
-    contract={'plan_digest':plan['plan_digest'],'config_digest':digest_json(config),'version':'studio-1.0'}
+    contract={'plan_digest':plan['plan_digest'],'config_digest':digest_json(config),'version':'studio-1.1-tail-qc'}
     contract['digest']=digest_json(contract)
     directory.mkdir(parents=True)
     for name,obj in [('plan',plan),('config',config),('contract',contract)]:atomic_write_json(directory/(name+'.json'),obj)
@@ -129,6 +131,7 @@ class Studio:
                     raise ValueError('MiniMax 参考图超出尺寸或大小限制')
         for phase in ['video']+(['lip'] if self.plan['audio_plan'] else []):self.adapter(phase)
         return {'status':'local_preflight_passed','network_calls':0,'account_entitlement_verified':False,
+                'local_quality_capabilities':capabilities() if not self.loopback else {'synthetic_test':True},
                 'note':'本地参数和密钥存在性通过，不代表账号额度、模型权限或真实效果通过'}
 
     def authorize(self,evidence):
@@ -181,6 +184,8 @@ class Studio:
         if digest_json(record['review'])!=record.get('review_digest'):
             raise ValueError('已验收记录已经变化，需要重新验收')
         if record['review'].get('video_sha256')!=record['clip_sha256']:raise ValueError('验收不匹配视频')
+        if record.get('tail_edit') and (digest_json(record['tail_edit'])!=record.get('tail_edit_digest') or record['tail_edit']['source_sha256']!=record['clip_sha256']):
+            raise ValueError('裁尾证据已经变化，需要重新检查')
         return record
     def _payload(self,job,record,phase):
         bindings=load_bindings(self.bindings_path);profile=self.plan['model_snapshot']
@@ -220,7 +225,7 @@ class Studio:
         if self.plan['continuity_mode']=='continue' and job['index']>1:
             previous=self.verify_accepted(self.plan['jobs'][job['index']-2]['job_id'])
             tail=self.root/f"context-{job['job_id']}-r{record['revision']}.mp4"
-            context=context_clip(Path(previous['clip']),tail)
+            context=context_clip(Path(previous['clip']),tail,end_seconds=previous.get('tail_edit',{}).get('end_seconds'))
             uri=resolve(context['path'],context['sha256'],bindings,require_url=profile['provider']=='aliyun',loopback=self.loopback)
             note='参考视频为上一段已验收结尾，只生成其后新的画面，不重播参考片段。原始参考图仍是人物身份基准。'
             if profile['provider']=='aliyun':
@@ -234,7 +239,7 @@ class Studio:
         job,record=self.job(ident)
         if self.plan['continuity_mode']!='continue' or job['index']==1:raise ValueError('此片段不需要续接上下文')
         previous=self.verify_accepted(self.plan['jobs'][job['index']-2]['job_id'])
-        return context_clip(Path(previous['clip']),self.root/f"context-{ident}-r{record['revision']}.mp4")
+        return context_clip(Path(previous['clip']),self.root/f"context-{ident}-r{record['revision']}.mp4",end_seconds=previous.get('tail_edit',{}).get('end_seconds'))
     def submit(self,ident):
         job,record=self.job(ident);phase=record['phase']
         if record['state'] not in {'planned','lip_ready'}:raise ValueError('片段已提交或待验收；不能自动重新下单')
@@ -308,9 +313,18 @@ class Studio:
         if self.plan.get('ad_contract'):checks=tuple(dict.fromkeys(checks+VIDEO_CHECKS))
         if sha256_file(video)!=sha:raise ValueError('视频已经改变')
         folder=self.root/'reviews'/f'{ident}-{sha[:16]}';extract_review_frames(video,folder)
+        script = ''.join(item['script'] for item in self.plan['jobs']) if final else job['script']
+        audio_file=folder/'audio-qc.json'
+        audio_report=read_json(audio_file) if audio_file.exists() else None
+        if not audio_report or not evidence_valid(audio_report,video,script):
+            audio_report=inspect_audio(video,folder,script,transcribe=not self.loopback)
+        if not final:
+            record['audio_qc_file']=str(audio_file);record['audio_qc_sha256']=sha256_file(audio_file)
+            self.save()
         manifest=folder/'manifest.json'
         template={'contract_digest':self.contract['digest'],'video_sha256':sha,'reviewer':'human_user','review_seconds':0,
                   'full_playback':False,'checks':{k:{'status':'pending','observations':''} for k in checks},
+                  'audio_qc_file':str(audio_file), 'tail_action':'auto',
                   'transcript':'','cues':[], 'text_review':{'manifest_file':str(manifest),'manifest_sha256':sha256_file(manifest),
                     'reviewer':'human_user','full_video_viewed':False,'all_sampled_frames_viewed':False,'last_frame_viewed':False,
                     'text_present':None,'observations':''}}
@@ -322,7 +336,9 @@ class Studio:
         if ad and ad['source_text']:template['text_review'].update(source_text_digest=digest_json(ad['source_text']),source_text_matches='pending',unapproved_text_present=None)
         target=folder/'review-template.json'
         if not target.exists():atomic_write_json(target,template)
-        return {'review_template':str(target),'video':str(video),'checks':list(checks)}
+        return {'review_template':str(target),'video':str(video),'checks':list(checks),
+                'audio_qc_file':str(audio_file),'automatic_audio_status':audio_report['status'],
+                'next_action':'由具备真实看听能力的 AI 完成待检项并继续；不是再次请求制作授权。确实缺能力时只说明缺项。'}
     def review(self,ident,evidence):
         final=ident=='final';job=None
         if final:
@@ -357,12 +373,27 @@ class Studio:
             # Cues are required here so final subtitles never use estimated speech times.
             temporary=self.root/'reviews'/f'{ident}-{sha[:16]}.srt'
             write_subtitles(evidence.get('cues'),record['technical']['seconds'],job['script'],temporary)
+        edit=None
+        if job and record['state']=='review_pending' and self.contract['version']=='studio-1.1-tail-qc':
+            action=evidence.get('tail_action','auto')
+            if action not in {'auto','preserve'}:raise ValueError('tail_action 只能为 auto 或 preserve')
+            if action=='preserve' and len(evidence.get('tail_observations','').strip())<8:
+                raise ValueError('保留有意设计的结束镜头须记录具体观察')
+            audio_report=None
+            if record.get('audio_qc_file'):
+                audio_path=Path(record['audio_qc_file'])
+                if sha256_file(audio_path)!=record['audio_qc_sha256']:raise ValueError('自动音频报告已变化，请重新 inspect')
+                audio_report=read_json(audio_path)
+            edit=tail_decision(video,job['script'],evidence.get('cues'),audio_report,
+                preserve=bool(self.plan['audio_plan']) or job['kind']!='talking_head' or job['native_audio_policy']!='retain_and_review' or action=='preserve')
         if final:
             if evidence.get('all_segments_and_seams_reviewed') is not True:raise ValueError('全片与全部接缝尚未验收')
             record['review']=evidence;record['review_digest']=digest_json(evidence);record['business_accepted']=True;record['status']='accepted';self.state['status']='delivered'
         elif record['state']=='base_review_pending':
             record.update(base_clip=record['clip'],base_sha256=sha,base_review=evidence,state='lip_ready',phase='lip',task=None)
-        else:record.update(review=evidence,review_digest=digest_json(evidence),state='accepted')
+        else:
+            record.update(review=evidence,review_digest=digest_json(evidence),state='accepted')
+            if edit:record.update(tail_edit=edit,tail_edit_digest=digest_json(edit))
         self.save();return {'status':record.get('state',record.get('status'))}
     def revise(self,ident,evidence):
         job,record=self.job(ident);approval=self.current_approval()
@@ -391,10 +422,13 @@ class Studio:
             self.state.setdefault('final_history',[]).append(self.state['final']);self.state['final']=None
         self.state['status']='authorized';self.save();return {'status':'revision_planned','invalidated':downstream}
     def assemble(self):
-        self.assets_unchanged();clips=[]
-        for job in self.plan['jobs']:clips.append(Path(self.verify_accepted(job['job_id'])['clip']))
+        self.assets_unchanged();clips=[];edits=[]
+        for job in self.plan['jobs']:
+            record=self.verify_accepted(job['job_id']);clips.append(Path(record['clip']))
+            # Historical contracts keep their timeline until explicitly re-reviewed/migrated.
+            edits.append(record.get('tail_edit') or tail_decision(Path(record['clip']),preserve=True))
         folder=self.root/'outputs'/f'render-{time.time_ns()}'
-        result=render(self.plan,clips,folder)
+        result=render(self.plan,clips,folder,edits=edits)
         target=self.plan.get('target_seconds')
         if target and self.plan.get('duration_mode') != 'reference' and not self.plan['audio_plan']:
             from studio_media import info
@@ -442,12 +476,46 @@ class Studio:
                 'files':files,'metrics':self.status(),'review':final['review'],'advertising_performance':'需实际投放数据验证'}
         atomic_write_json(self.root/'delivery.json',result);return result
 
+    def advance(self,review_dir=None):
+        """Advance existing authorization to the next genuine external/review boundary."""
+        review_dir=Path(review_dir).resolve() if review_dir else self.root/'completed-reviews'
+        for _ in range(len(self.plan['jobs'])*8+8):
+            pending=next((j for j in self.plan['jobs'] if self.state['jobs'][j['job_id']]['state']!='accepted'),None)
+            if pending:
+                ident=pending['job_id'];record=self.state['jobs'][ident];state=record['state']
+                if state in {'planned','lip_ready'}:
+                    self.submit(ident)
+                    continue
+                if state=='submitted':
+                    result=self.poll(ident)
+                    if result['status']=='pending':return {'status':'waiting_provider','job_id':ident,'next_action':'稍后再次 advance；只查询原任务，不增加确认或重复提交'}
+                    continue
+                if state in {'review_pending','base_review_pending'}:
+                    evidence=review_dir/f"{ident}-{record['clip_sha256'][:16]}.json"
+                    if evidence.is_file():
+                        self.review(ident,read_json(evidence))
+                        continue
+                    return {'status':'awaiting_agent_review','job_id':ident,'evidence_destination':str(evidence),**self.inspect(ident)}
+                return {'status':'blocked','job_id':ident,'reason':state,'retry_allowed':False}
+            if not self.state.get('final'):
+                self.assemble()
+                continue
+            if self.state['final'].get('business_accepted'):return self.deliver()
+            sha=self.state['final']['video_sha256']
+            evidence=review_dir/f'final-{sha[:16]}.json'
+            if evidence.is_file():
+                self.review('final',read_json(evidence))
+                continue
+            return {'status':'awaiting_agent_review','job_id':'final','evidence_destination':str(evidence),**self.inspect('final')}
+        raise ValueError('推进次数超过预期，请检查状态；未自动重试付费任务')
+
 
 def main():
     parser=argparse.ArgumentParser(description='多模型生产执行；一次提交、显式授权、逐段验收')
-    parser.add_argument('command',choices=['prepare','authorize','submit','poll','recover','context','inspect','review','revise','assemble','status','deliver','preflight'])
+    parser.add_argument('command',choices=['prepare','authorize','submit','poll','recover','context','inspect','review','revise','assemble','status','deliver','preflight','advance'])
     parser.add_argument('--project',type=Path,required=True);parser.add_argument('--spec',type=Path);parser.add_argument('--config',type=Path)
     parser.add_argument('--job');parser.add_argument('--evidence',type=Path);parser.add_argument('--env-file',type=Path);parser.add_argument('--bindings',type=Path)
+    parser.add_argument('--review-dir',type=Path)
     args=parser.parse_args()
     try:
         if args.command=='prepare':
@@ -456,7 +524,8 @@ def main():
         else:
             with project_lock(args.project):
                 studio=Studio(args.project,args.env_file,args.bindings)
-                if args.command in {'submit','poll','context','inspect'}:
+                if args.command=='advance':result=studio.advance(args.review_dir)
+                elif args.command in {'submit','poll','context','inspect'}:
                     if not args.job:raise ValueError('需要 --job')
                     result=getattr(studio,args.command)(args.job)
                 elif args.command in {'authorize','recover','review','revise'}:

@@ -1,0 +1,24 @@
+name: Cross-platform offline regression
+on: [push, pull_request]
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare local dependencies (no speech model or provider calls)
+        run: python -B shuzirenskil/scripts/setup_environment.py --skip-model
+      - name: Validate distribution
+        run: python -B shuzirenskil/scripts/validate_skill.py
+      - name: Run core regression
+        run: python -B -m unittest discover -s shuzirenskil/tests -v
+      - name: Run installer regression
+        run: python -B -m unittest discover -s tests -v

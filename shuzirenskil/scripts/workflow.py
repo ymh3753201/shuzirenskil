@@ -980,6 +980,8 @@ def _segment_prompt(
 
 def command_preflight(args: argparse.Namespace) -> None:
     project = load_project(args.project_dir)
+    from runtime_tools import capabilities
+    atomic_write_json(args.project_dir/'local-quality-capabilities.json', capabilities())
     if project["state"]["stage"] not in {"production_authorized", "preflight_passed"}:
         raise ValueError("必须先完成相应用户确认")
     _verify_plan_digest(project)
@@ -1573,7 +1575,28 @@ def command_stitch(args: argparse.Namespace) -> None:
         if not jobs["jobs"] or any(job["status"] not in {"downloaded", "verified"} for job in jobs["jobs"]):
             raise ValueError("并非所有片段都已下载")
         clips = [Path(job["clip_path"]) for job in jobs["jobs"]]
-        report = stitch(clips, output, args.project_dir / "work" / "stitch", project["settings"]["aspect_ratio"])
+        edits = None
+        if getattr(args, 'tail_evidence_file', None):
+            from audio_qc import tail_decision
+            from studio_media import write_subtitles
+            evidence = read_json(args.tail_evidence_file)
+            edits = []
+            for job, segment, clip in zip(jobs['jobs'], project['plan']['segments'], clips):
+                item = evidence.get(job['shot_id'], {})
+                if (item.get('video_sha256') != sha256_file(clip) or item.get('full_playback') is not True
+                    or item.get('reviewer') not in {'human_user','agent_audiovisual'}
+                    or _normalized_speech_text(item.get('transcript','')) != _normalized_speech_text(segment['script'])
+                    or len(item.get('observations','').strip()) < 8):
+                    raise ValueError('裁尾依据缺少当前原片的真实看听、台词和具体观察')
+                qa_dir=args.project_dir/'audio-qc'/job['shot_id']
+                qa_dir.mkdir(parents=True,exist_ok=True)
+                write_subtitles(item.get('cues'), technical_summary(clip)['duration_seconds'],segment['script'],qa_dir/'reviewed.srt')
+                report_path=qa_dir/'audio-qc.json'
+                audio_report=read_json(report_path) if report_path.exists() else None
+                action=item.get('tail_action','auto')
+                if action not in {'auto','preserve'}:raise ValueError('tail_action 无效')
+                edits.append(tail_decision(clip,segment['script'],item['cues'],audio_report,preserve=action=='preserve'))
+        report = stitch(clips, output, args.project_dir / "work" / "stitch", project["settings"]["aspect_ratio"], edits=edits)
     report["duration_checks"] = _duration_review_checks(report["output"]["duration_seconds"], project["plan"], project["route"])
     report["candidate_sha256"] = sha256_file(output)
     report["quality_status"] = "awaiting_full_review" if all(report["duration_checks"].values()) else "duration_failed_manual_review_pending"
@@ -1921,6 +1944,71 @@ def command_status(args: argparse.Namespace) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2))
 
 
+def command_inspect_audio(args: argparse.Namespace) -> None:
+    from audio_qc import inspect_audio, evidence_valid
+    project=load_project(args.project_dir)
+    jobs_path=args.project_dir/'jobs.json'
+    targets=[]
+    if jobs_path.exists():
+        for job,segment in zip(read_json(jobs_path)['jobs'],project['plan']['segments']):
+            if job.get('clip_path') and Path(job['clip_path']).is_file():
+                targets.append((job['shot_id'],Path(job['clip_path']),segment['script']))
+    final=args.project_dir/'outputs/final.clean.mp4'
+    if final.is_file():targets.append(('final',final,project['script']))
+    if not targets:raise ValueError('没有已下载的原片或成片')
+    results=[]
+    for ident,video,script in targets:
+        folder=args.project_dir/'audio-qc'/ident
+        path=folder/'audio-qc.json'
+        report=read_json(path) if path.exists() else None
+        if not report or not evidence_valid(report,video,script):
+            report=inspect_audio(video,folder,script,transcribe=not getattr(args,'no_asr',False))
+        results.append({'job':ident,'report':str(path),'status':report['status']})
+    print(json.dumps({'audio_checks':results,'perceptual_review':'pending','new_paid_requests':0},ensure_ascii=False,indent=2))
+
+
+def command_advance(args: argparse.Namespace) -> None:
+    """No new authorization: run until a provider wait or genuine review boundary."""
+    def invoke(command,*extra):
+        argv=['--project-dir',str(args.project_dir)]
+        if args.env_file:argv+=['--env-file',str(args.env_file)]
+        if args.provider:argv+=['--provider',args.provider]
+        sub=build_parser().parse_args(argv+[command,*extra]);sub.handler(sub)
+    for _ in range(12):
+        project=load_project(args.project_dir);stage=project['state']['stage']
+        if stage=='preflight_passed':
+            invoke('stitch' if project['route']=='postproduction_only' else 'submit');continue
+        if stage=='production_started':
+            jobs=read_json(args.project_dir/'jobs.json')['jobs']
+            pilot=project['settings'].get('pilot_first') and len(jobs)>1
+            if any(j['status']=='planned' for j in jobs) and (not pilot or project['state'].get('pilot_review_passed')):
+                invoke('submit')
+            invoke('poll','--max-polls','1')
+            if load_project(args.project_dir)['state']['stage']==stage:
+                print('等待服务商原任务完成；稍后再次 advance，不需要重复确认。');return
+            continue
+        if stage=='pilot_review_pending':
+            if args.pilot_evidence:
+                invoke('review-pilot','--evidence-file',str(args.pilot_evidence));continue
+            invoke('inspect-audio')
+            print('首段待真实看听：AI 完成 review-pilot 后再次 advance；不是新的制作授权。');return
+        if stage=='clips_downloaded':
+            invoke('inspect-audio')
+            extra=['--tail-evidence-file',str(args.tail_evidence_file)] if args.tail_evidence_file else []
+            invoke('stitch',*extra);continue
+        if stage in {'clean_candidate_ready','captioned_candidate_ready'}:
+            invoke('inspect-audio')
+            print('候选待实际视觉/声音/接缝验收；AI 完成 review 后再次 advance。');return
+        if stage=='clean_review_passed' and project['settings']['subtitle_choice']=='enabled':
+            if not args.timing_srt:
+                print('字幕需要实际已审核时间码；准备 timing SRT 后再次 advance --timing-srt，无需重新确认制作。');return
+            invoke('subtitles','--timing-srt',str(args.timing_srt));continue
+        if stage in {'clean_review_passed','captioned_review_passed'}:
+            invoke('finalize');return
+        invoke('status');return
+    raise ValueError('推进步骤超过预期，请核对项目状态，不自动重新生成')
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="shuzirenskil guarded workflow")
     parser.add_argument("--project-dir", type=Path, help="除只读 plan 外，所有命令必须提供项目目录")
@@ -2054,6 +2142,7 @@ def build_parser() -> argparse.ArgumentParser:
     pilot_review.set_defaults(handler=command_review_pilot)
 
     stitch_parser = subparsers.add_parser("stitch")
+    stitch_parser.add_argument('--tail-evidence-file', type=Path)
     stitch_parser.set_defaults(handler=command_stitch)
 
     review = subparsers.add_parser("review")
@@ -2074,6 +2163,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status")
     status.set_defaults(handler=command_status)
+    audio_check=subparsers.add_parser('inspect-audio')
+    audio_check.add_argument('--no-asr',action='store_true')
+    audio_check.set_defaults(handler=command_inspect_audio)
+    advance=subparsers.add_parser('advance')
+    advance.add_argument('--pilot-evidence',type=Path)
+    advance.add_argument('--tail-evidence-file',type=Path)
+    advance.add_argument('--timing-srt',type=Path)
+    advance.set_defaults(handler=command_advance)
     return parser
 
 

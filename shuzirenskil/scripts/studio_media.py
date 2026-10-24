@@ -41,12 +41,14 @@ def check_clip(path, job, plan, config, *, lip=False):
     return meta
 
 
-def context_clip(path, output, seconds=2):
+def context_clip(path, output, seconds=2, end_seconds=None):
     meta=info(path)
-    if meta['seconds'] < seconds:raise ValueError('上一段不足 2 秒，不能作为所选模型的视频参考')
-    command(['ffmpeg','-v','error','-y','-sseof',str(-seconds),'-i',str(path),'-t',str(seconds),
+    end = meta['seconds'] if end_seconds is None else end_seconds
+    if not math.isfinite(end) or not seconds <= end <= meta['seconds']+2/meta['fps']:raise ValueError('已审有效尾段不足 2 秒或越界，不能作为续接参考')
+    end=min(meta['seconds'],math.ceil(end*meta['fps']-1e-7)/meta['fps'])
+    command(['ffmpeg','-v','error','-y','-ss',str(end-seconds),'-i',str(path),'-t',str(seconds),
              '-an','-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',str(output)])
-    return {'path':str(output.resolve()),'sha256':sha256_file(output),'seconds':seconds}
+    return {'path':str(output.resolve()),'sha256':sha256_file(output),'seconds':seconds,'source_end_seconds':end}
 
 
 def stamp(seconds):
@@ -68,11 +70,12 @@ def write_subtitles(cues, duration, expected_text, path):
     Path(path).write_text('\n'.join(parts),encoding='utf-8')
 
 
-def render(plan, clips, output):
+def render(plan, clips, output, edits=None):
     """Render accepted clips; never trim master audio, stretch speech or fabricate frames."""
     output=Path(output);output.mkdir(parents=True,exist_ok=False)
     jobs=plan['jobs']
     if len(clips)!=len(jobs):raise ValueError('片段数量与计划不符')
+    if edits is not None and len(edits)!=len(jobs):raise ValueError('裁尾记录数量与片段不符')
     first=info(clips[0]);fps=first['fps']; locked=bool(plan.get('audio_plan'))
     timeline=[];cursor_frames=0; files=[]
     for index,(job,path) in enumerate(zip(jobs,clips),1):
@@ -87,6 +90,15 @@ def render(plan, clips, output):
             # Count actual decoded frames; metadata duration can include an AAC tail.
             counted=command(['ffprobe','-v','error','-select_streams','v:0','-count_frames','-show_entries','stream=nb_read_frames','-of','csv=p=0',str(path)])
             frames=int(counted.strip())
+            from audio_qc import tail_decision
+            edit = edits[index-1] if edits is not None else tail_decision(path, preserve=job.get('kind','talking_head')!='talking_head' or job['native_audio_policy']!='retain_and_review')
+            if edit.get('source_sha256') != sha256_file(Path(path)):
+                raise ValueError('裁尾记录没有绑定当前原片')
+            end = edit['end_seconds']
+            if type(end) not in (int,float) or not math.isfinite(end) or not 0 < end <= meta['seconds']+0.05:
+                raise ValueError('裁尾时间无效')
+            # Ceil protects the last reviewed syllable; no frame interpolation.
+            frames=min(frames, math.ceil(end*fps-1e-7))
         if frames<=0 or meta['seconds']+1/fps<frames/fps:raise ValueError('视频不足以覆盖主音轨，不能冻结补帧')
         target=output/f'part_{index:04d}.mkv'
         vf=f'trim=end_frame={frames},setpts=PTS-STARTPTS'
@@ -100,7 +112,8 @@ def render(plan, clips, output):
             args+=['-vf',vf,'-af',f'apad,atrim=duration={frames/fps},asetpts=PTS-STARTPTS','-c:v','libx264','-preset','fast','-crf','18','-c:a','pcm_s16le','-ar','48000','-ac','1']
         args+=['-t',str(frames/fps),str(target)];command(args);files.append(target)
         timeline.append({'job_id':job['job_id'],'start_seconds':cursor_frames/fps,'end_seconds':(cursor_frames+frames)/fps,
-                         'frames':frames,'script':job['script'],'source_sha256':sha256_file(Path(path))})
+                         'frames':frames,'script':job['script'],'source_sha256':sha256_file(Path(path)),
+                         'source_end_seconds':frames/fps,'tail_edit':None if locked else edit})
         cursor_frames+=frames
     listing=output/'concat.txt';listing.write_text(''.join("file '"+p.name+"'\n" for p in files))
     joined=output/'joined.mkv'

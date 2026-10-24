@@ -1,5 +1,7 @@
 # 交付质检清单
 
+rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，doctor 实测；自动音频报告不替代真实听审。既定范围用 advance 持续推进，首段检查通过后不追加用户确认。新入口原生声音安全裁尾与严格音轨保护分别处理。
+
 新规则见 `voice-casting-and-text-review.md`：每个原片和最终成片检查全片、全部取样和真实末帧，`no_generated_text=pass` 必须带绑定视频指纹的 `text_review`。首段先检查角色声线匹配；最终逐段对照首段实听并记录 `voice_casting_match` 和跨段一致性。
 
 

@@ -1,5 +1,7 @@
 # 执行流程
 
+rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，doctor 实测；自动音频报告不替代真实听审。既定范围用 advance 持续推进，首段检查通过后不追加用户确认。新入口原生声音安全裁尾与严格音轨保护分别处理。
+
 2026-10-18：本文件描述现有 Grok 执行器。多模型离线计划见 `multimodel-production.md`。首段每项观察改用 `{"status":"pass|fail|pending","observations":"至少8字真实观察"}`；只有全部明确 pass 才放行。旧纯文字记录需重新验收，已通过但尚未提交后续片段的项目可再次 `review-pilot`，旧报告自动保存在 `review-history/`。
 
 3.0 新项目增加两个必要步骤：绑定图片后，按 `voice-casting-and-text-review.md` 完成 `review-character`，再走原定 `authorize`；视频下载后先运行 `inspect-visuals`，真实完整检查后把 `text_review` 合入 `review-pilot` 或最终 `review` 证据。首段与最终还要检查 `voice_casting_match`。检查项只在实际看听后标记通过。

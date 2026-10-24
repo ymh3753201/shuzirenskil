@@ -1,10 +1,14 @@
-请在我的视频项目安装这份 shuzirenskil。我是零基础，请直接操作，简单汇报。
+请在我的视频项目安装最新版 shuzirenskil，并把本地媒体与语音识别环境一起准备好。我是零基础，请直接操作，用简单中文汇报。
 
-完整解压后的安装包目录：【填写本机路径】
-视频项目目录：【填写；没有请先帮我创建】
+安装来源：【https://github.com/ymh3753201/shuzirenskil 或完整解压后的本机安装包目录】
+视频项目：【当前项目；没有请帮我创建单独的项目文件夹】
 
-先读安装和使用说明.md 和 shuzirenskil/SKILL.md，识别 Windows/macOS，检查 Python 3.10+、FFmpeg、ffprobe。核对文件后，用包内 install.py 安装到项目的 .agents/skills/shuzirenskil；已有版本先备份，保留配置和素材，不直接覆盖。
+先读安装和使用说明.md、SKILL.md 和 references/automatic-quality.md。识别系统、CPU、实际可运行的 Python；优先准备 Python 3.12，不把 Windows 应用商店别名当成解释器。核对版本和文件清单。已有 Skill 先停止制作并备份，保留作品、配置和任务记录。
 
-按 references/setup-and-troubleshooting.md 准备系统凭据库。服务资料只问缺少的信息，密钥由我在本机隐藏输入；保存后回读并用新进程验证，不显示密钥，也不把空 .env 当作配置完成。
+用 install.py --with-runtime 安装。需要联网下载的本地依赖和识别模型已包含在这次安装任务中，请按清单安装并实际运行 doctor --self-test。安装到项目 .agents/skills/shuzirenskil；依赖放独立运行环境，不破坏系统 Python。只有文件已安装而环境步骤失败时，继续运行已安装技能的 scripts/setup_environment.py，不要重复覆盖安装。
 
-本次只安装和配置，不上传私人素材或生成图片、视频。最后告诉我版本、安装位置、已通过和待补的检查；需要新开 Codex 会话就告诉我。
+再检查本次会话实际可用的看图、音频和完整视频工具。不能直接听音频时仍要验证本地静音、转写和语音时间检测；区分技术能力与主观听审，不因依赖存在就声称已经看听。
+
+后续统一用 scripts/run.py 运行凭据、制作与质检命令。按 setup-and-troubleshooting.md 准备系统凭据库，只问缺少的服务资料，密钥在本机隐藏输入，保存后回读并用新进程验证，不显示密钥。不能把空配置文件当作完成。
+
+本次只安装、下载公开依赖和本地自检，不上传私人素材，不生成图片或视频。最后分别告诉我：版本与位置、依赖/识别自检结果、当前会话视听能力、模型配置缺项。需要新开会话就说明。
