@@ -108,9 +108,9 @@ class StudioTests(unittest.TestCase):
         return value
     def approve(self,s):s.authorize(self.approval(s))
     def accept(self,s,ident):
-        template=s.inspect(ident);e=read_json(Path(template['review_template']));e.update(full_playback=True,review_seconds=10,all_segments_and_seams_reviewed=True)
+        template=s.inspect(ident);e=read_json(Path(template['review_template']));e.update(reviewer='human_user',full_playback=True,review_seconds=10,all_segments_and_seams_reviewed=True)
         for v in e['checks'].values():v.update(status='pass',observations='仅模拟测试检查记录，不代表真实观看与效果验收。')
-        e['text_review'].update(full_video_viewed=True,all_sampled_frames_viewed=True,last_frame_viewed=True,text_present=False,observations='仅模拟测试检查记录，不代表真实看图结论。')
+        e['text_review'].update(reviewer='human_user',full_video_viewed=True,all_sampled_frames_viewed=True,last_frame_viewed=True,text_present=False,observations='仅模拟测试检查记录，不代表真实看图结论。')
         if ident!='final':
             job,record=s.job(ident);e['transcript']=job['script'];e['cues']=[{'start_seconds':0.1,'end_seconds':record['technical']['seconds']-0.2,'text':job['script']}]
         s.review(ident,e)

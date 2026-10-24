@@ -64,10 +64,10 @@ def validate_full_decode(path: Path, *, require_audio: bool = True) -> None:
             require_command("ffmpeg"), "-v", "error", "-xerror", "-i", str(path),
             "-map", "0:v:0", "-map", "0:a:0" if require_audio else "0:a:0?", "-f", "null", "-",
         ])
-    except subprocess.CalledProcessError:
-        raise ValueError("全片音视频解码失败，不能通过技术检查") from None
+    except subprocess.CalledProcessError as exc:
+        raise ValueError("全片音视频解码失败，不能通过技术检查：" + (exc.stderr or '')[:1000]) from None
     if result.stderr.strip():
-        raise ValueError("全片音视频解码发现错误，不能通过技术检查")
+        raise ValueError("全片音视频解码发现错误，不能通过技术检查：" + result.stderr.strip()[:1000])
 
 
 def detect_tail_silence(path: Path, noise_db: str = "-35dB", min_duration: float = 0.25) -> dict[str, float | bool]:

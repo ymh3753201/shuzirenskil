@@ -5,10 +5,13 @@ import json
 import re
 import sys
 from pathlib import Path
+from console_utf8 import configure
 
+configure()
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REQUIRED = [
+    "VERSION", "scripts/console_utf8.py",
     "scripts/runtime_tools.py", "scripts/setup_environment.py", "scripts/run.py",
     "scripts/doctor.py", "scripts/audio_qc.py", "scripts/audio_worker.py",
     "requirements-runtime.txt", "references/automatic-quality.md",

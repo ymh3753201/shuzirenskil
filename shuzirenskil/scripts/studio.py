@@ -322,11 +322,11 @@ class Studio:
             record['audio_qc_file']=str(audio_file);record['audio_qc_sha256']=sha256_file(audio_file)
             self.save()
         manifest=folder/'manifest.json'
-        template={'contract_digest':self.contract['digest'],'video_sha256':sha,'reviewer':'human_user','review_seconds':0,
+        template={'contract_digest':self.contract['digest'],'video_sha256':sha,'reviewer':None,'review_seconds':0,
                   'full_playback':False,'checks':{k:{'status':'pending','observations':''} for k in checks},
                   'audio_qc_file':str(audio_file), 'tail_action':'auto',
                   'transcript':'','cues':[], 'text_review':{'manifest_file':str(manifest),'manifest_sha256':sha256_file(manifest),
-                    'reviewer':'human_user','full_video_viewed':False,'all_sampled_frames_viewed':False,'last_frame_viewed':False,
+                    'reviewer':None,'full_video_viewed':False,'all_sampled_frames_viewed':False,'last_frame_viewed':False,
                     'text_present':None,'observations':''}}
         if not final and job['index']>1:
             template['baseline_sha256']=self.verify_accepted(self.plan['jobs'][0]['job_id'])['clip_sha256']

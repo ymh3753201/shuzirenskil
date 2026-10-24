@@ -11,6 +11,11 @@ import subprocess
 import sys
 import tempfile
 
+os.environ['PYTHONUTF8'] = '1'
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8', errors='backslashreplace')
 
 def install(project: Path) -> Path:
     if sys.version_info < (3, 10):

@@ -4,6 +4,9 @@ import subprocess
 import sys
 from pathlib import Path
 from runtime_tools import settings, activate
+from console_utf8 import configure
+
+configure()
 
 
 def main():

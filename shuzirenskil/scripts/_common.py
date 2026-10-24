@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from runtime_tools import activate
+from console_utf8 import configure
 
+configure()
 activate()
 
 if os.name == 'nt':
