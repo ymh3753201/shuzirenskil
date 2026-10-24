@@ -1,5 +1,8 @@
 # 多模型完整执行指南（2026-10-18）
 
+rc7：普通原生声音连续制作先读 `continuous-production.md`，spec 在首次确认前写 `review_mode=continuous_candidate`；该模式用 review-production 放行候选片制作，全片 review/deliver 的真实验收保留。以下逐段完整听审是 full_per_segment、广告及严格音轨的路径。
+
+
 rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，doctor 实测；自动音频报告不替代真实听审。既定范围用 advance 持续推进，首段检查通过后不追加用户确认。新入口原生声音安全裁尾与严格音轨保护分别处理。
 
 这是新 `studio.py` 的执行协议。旧项目继续使用 `workflow.py`，两种项目文件不能互相改名混用。

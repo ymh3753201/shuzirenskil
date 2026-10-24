@@ -20,7 +20,7 @@ from request_preview import compile_preview
 
 SPEC_FIELDS = {"schema_version", "name", "model_profile", "voice", "voice_design", "script", "assets",
                "reference_images", "character_bible", "resolution", "aspect_ratio", "duration_mode",
-               "target_seconds", "speech_rate_cpm", "continuity_mode", "purpose", "ad_contract", "shots", "audio_cues", "merge_shots"}
+               "target_seconds", "speech_rate_cpm", "continuity_mode", "purpose", "ad_contract", "shots", "audio_cues", "merge_shots", "review_mode"}
 
 
 def _normalized(text: str) -> str:
@@ -217,7 +217,8 @@ def build_plan(spec: dict, base: Path) -> dict:
         prompt = "；".join(f"{k}: {v}" for k, v in bible.items()) + "。\n" + segment["visual_brief"]
         prompt += "。生成真实连续动态画面，禁止照片拼贴或静态照片推拉。\n" + ad_prompt
         if not ad or not ad["source_text"]:
-            prompt += "\n从第一帧到最后一帧不出现字幕、文字、Logo、水印、UI 或片尾卡。"
+            from video_prompt import NO_TEXT_RULE
+            prompt += "\n无文字画面合同：" + NO_TEXT_RULE
         audio_token = None
         if is_talking and voice["mode"] != "locked_audio":
             prompt += f"\n逐字口播：{segment['script']}\n角色声音设计：{design}"
@@ -254,6 +255,17 @@ def build_plan(spec: dict, base: Path) -> dict:
               "actual_timeline_required": audio_plan is None,
               "required_reviews": ["逐段正常速度看听", "台词", "人物与产品身份", "口型", "跨段音色", "接缝", "画面文字", "广告事实和行动引导"],
               "execution_blockers": blockers}
+    mode = spec.get('review_mode', 'auto')
+    eligible = purpose == 'narration' and not audio_plan and all(j['kind'] == 'talking_head' and j['native_audio_policy'] == 'retain_and_review' for j in jobs)
+    if mode == 'auto':mode = 'continuous_candidate' if eligible else 'full_per_segment'
+    if mode not in {'full_per_segment', 'continuous_candidate'}:
+        raise ValueError('review_mode 无效')
+    if mode == 'continuous_candidate':
+        if not eligible:
+            raise ValueError('连续候选制作仅适用于普通原生声音口播；严格音轨、广告和 B-roll 保留原验收流程')
+        from production_review import NOTICE
+        result['review_mode'] = mode
+        result['review_notice'] = NOTICE
     result["plan_digest"] = digest_json(result)
     return result
 

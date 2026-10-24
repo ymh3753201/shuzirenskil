@@ -146,6 +146,9 @@ class GuardedApiTests(unittest.TestCase):
         cli_args = list(args)
         if cli_args and cli_args[0] == "prepare" and "--video-prompt-spec" not in cli_args:
             cli_args.append("--allow-legacy-performance-plan")
+        # Existing tests exercise the preserved full-review contract.
+        if cli_args and cli_args[0] == 'prepare' and '--review-mode' not in cli_args:
+            cli_args += ['--review-mode','full_per_segment']
         result = subprocess.run(
             [*command, *cli_args],
             text=True,

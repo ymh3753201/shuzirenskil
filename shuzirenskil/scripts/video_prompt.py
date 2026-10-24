@@ -11,7 +11,7 @@ from ad_contract import validate_ad_contract, render_ad_prompt
 PROMPT_SPEC_VERSION = "3.0"
 CASTING_FIELDS = ("character_key", "role", "visual_basis", "rationale", "resonance", "texture", "articulation", "avoid")
 CASTING_SOUND_FIELDS = ("resonance", "texture", "articulation", "avoid")
-NO_TEXT_RULE = "画面从第一帧到最后一帧均不出现任何文字、字幕、标题、金句、片尾卡、Logo、水印或 UI；台词和表演触发词仅用于声音与动作，不得转为屏幕文字。末句说完继续保持同一人物和场景，自然收声，不生成总结字卡。"
+NO_TEXT_RULE = "采用纯摄影画面，仅人物、实景与自然动作。画面从第一帧到最后一帧均不出现任何文字、字幕、标题、金句、片尾卡、Logo、水印或 UI；台词和表演触发词仅用于声音与动作，不得转为屏幕文字。人物说到数字、列表、重点词或举手计数时，只用口述与手势表达，不出现对应字符或动态图文。末句说完继续保持同一人物和场景，自然收声，不生成总结字卡。"
 MAX_PROMPT_CHARS = 4096
 VOICE_PROFILE_FIELDS = (
     "gender",

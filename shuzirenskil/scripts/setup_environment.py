@@ -46,7 +46,7 @@ def setup(skip_model=False, offline_cache=None):
             args += ['--no-index', '--find-links', cache/'wheels']
         run(args)
         # Catch platform-specific DLL/import failures before the large model download.
-        run([python, '-c', 'import faster_whisper; from faster_whisper.vad import get_vad_model; get_vad_model()'])
+        run([python, '-c', 'import faster_whisper, opencc; from faster_whisper.vad import get_vad_model; from rapidocr_onnxruntime import RapidOCR; get_vad_model(); RapidOCR(intra_op_num_threads=2, inter_op_num_threads=2)'])
         ffmpeg, ffprobe = shutil.which('ffmpeg'), shutil.which('ffprobe')
         if not (ffmpeg and ffprobe):
             if cache:

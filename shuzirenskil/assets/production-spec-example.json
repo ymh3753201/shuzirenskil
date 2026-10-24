@@ -1,5 +1,6 @@
 {
   "schema_version": "1.0",
+  "review_mode": "continuous_candidate",
   "name": "门店数字人口播方案",
   "model_profile": "wan3-reference",
   "voice": {

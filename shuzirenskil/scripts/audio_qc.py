@@ -13,6 +13,12 @@ from runtime_tools import settings
 
 
 def normalized(text):
+    # Orthography only: retain raw ASR; never fuzzy-match names, numbers or words.
+    try:
+        from opencc import OpenCC
+        text = OpenCC('t2s').convert(text)
+    except ImportError:
+        pass  # Old installations remain strict until the managed runtime is upgraded.
     return re.sub(r'[\W_]+', '', text, flags=re.UNICODE).lower()
 
 

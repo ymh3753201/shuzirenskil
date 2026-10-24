@@ -79,7 +79,7 @@ class StudioTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.remote=LocalProvider(self.root)
         command(['ffmpeg','-v','error','-y','-f','lavfi','-i','color=s=32x56','-frames:v','1',str(self.root/'person.png')])
         wav(self.root/'master.wav',7)
-        self.spec={'schema_version':'1.0','name':'离线测试，非模型样片','model_profile':'minimax-h3-reference',
+        self.spec={'schema_version':'1.0','review_mode':'full_per_segment','name':'离线测试，非模型样片','model_profile':'minimax-h3-reference',
             'voice':{'mode':'model_generated'},'voice_design':'温和自然、清楚有力的中性声音。','script':'你好。欢迎。',
             'assets':{'person':{'path':'person.png','kind':'image','role':'identity'},'voice':{'path':'master.wav','kind':'audio'}},
             'reference_images':['person'],'character_bible':{k:'测试用固定描述。' for k in ['identity','wardrobe','scene','camera','lighting']},

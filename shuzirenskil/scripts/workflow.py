@@ -281,6 +281,7 @@ def command_prepare(args: argparse.Namespace) -> None:
         "updated_at": now_iso(),
         "route": route,
         "settings": {
+            "review_mode": getattr(args, 'review_mode', 'auto'),
             "purpose": purpose,
             "language": args.language,
             "aspect_ratio": args.aspect_ratio,
@@ -311,9 +312,16 @@ def command_prepare(args: argparse.Namespace) -> None:
             "pilot_review_passed": False,
         },
     }
+    if project['settings']['review_mode'] == 'auto':
+        project['settings']['review_mode'] = 'continuous_candidate' if purpose == 'narration' and route == 'video_generation' and not args.no_pilot_first else 'full_per_segment'
+    if project['settings']['review_mode'] == 'continuous_candidate':
+        if purpose != 'narration' or route != 'video_generation' or args.no_pilot_first:
+            raise ValueError('连续候选制作适用于普通口播，保留首段制作检查；广告和后期项目沿用完整验收')
+        from production_review import NOTICE
+        project['settings']['review_notice'] = NOTICE
     project["plan_digest"] = digest_json(_project_core(project))
     save_project(project_dir, project)
-    print(json.dumps({"status": "prepared", "plan": plan, "plan_digest": project["plan_digest"]}, ensure_ascii=False, indent=2))
+    print(json.dumps({"status": "prepared", "plan": plan, "plan_digest": project["plan_digest"], "review_notice": project['settings'].get('review_notice', '逐段完整验收')}, ensure_ascii=False, indent=2))
 
 
 def command_confirm_plan(args: argparse.Namespace) -> None:
@@ -982,6 +990,9 @@ def command_preflight(args: argparse.Namespace) -> None:
     project = load_project(args.project_dir)
     from runtime_tools import capabilities
     atomic_write_json(args.project_dir/'local-quality-capabilities.json', capabilities())
+    if project['settings'].get('review_mode') == 'continuous_candidate':
+        from production_review import require_runtime
+        require_runtime()
     if project["state"]["stage"] not in {"production_authorized", "preflight_passed"}:
         raise ValueError("必须先完成相应用户确认")
     _verify_plan_digest(project)
@@ -1367,20 +1378,23 @@ def command_submit(args: argparse.Namespace) -> None:
         raise ValueError("当前项目不能提交视频任务")
     pilot_first = bool(project["settings"].get("pilot_first")) and project["plan"]["minimum_paid_segment_count"] > 1
     if pilot_first and project["state"]["stage"] == "production_started":
-        pilot_path = args.project_dir / "pilot-review.json"
-        if not project["state"].get("pilot_review_passed") or not pilot_path.is_file():
-            raise ValueError("首段尚未通过自然度和口播检查，后续片段不能付费提交")
-        pilot = read_json(pilot_path)
-        validate_pilot_checks(pilot.get("evidence", {}), project)
-        first_job = read_json(args.project_dir / "jobs.json")["jobs"][0]
-        if (pilot.get("status") != "pass" or pilot.get("project_id") != project["project_id"]
-                or pilot.get("contract_digest") != project.get("contract_digest")
-                or pilot.get("task_id") != first_job.get("task_id")
-                or pilot.get("clip_sha256") != sha256_file(Path(first_job["clip_path"]))):
-            raise ValueError("首段试片验收记录与当前项目或视频不匹配，后续付费提交已停止")
-        if pilot.get("evidence", {}).get("text_review") or project["settings"].get("character_review_required"):
-            validate_text_review(pilot.get("evidence", {}), Path(first_job["clip_path"]), project)
-        validate_ad_review(project, pilot.get("evidence", {}), video=Path(first_job["clip_path"]))
+        if project['settings'].get('review_mode') == 'continuous_candidate':
+            _production_clearance(args.project_dir, project, 0)
+        else:
+            pilot_path = args.project_dir / "pilot-review.json"
+            if not project["state"].get("pilot_review_passed") or not pilot_path.is_file():
+                raise ValueError("首段尚未通过自然度和口播检查，后续片段不能付费提交")
+            pilot = read_json(pilot_path)
+            validate_pilot_checks(pilot.get("evidence", {}), project)
+            first_job = read_json(args.project_dir / "jobs.json")["jobs"][0]
+            if (pilot.get("status") != "pass" or pilot.get("project_id") != project["project_id"]
+                    or pilot.get("contract_digest") != project.get("contract_digest")
+                    or pilot.get("task_id") != first_job.get("task_id")
+                    or pilot.get("clip_sha256") != sha256_file(Path(first_job["clip_path"]))):
+                raise ValueError("首段试片验收记录与当前项目或视频不匹配，后续付费提交已停止")
+            if pilot.get("evidence", {}).get("text_review") or project["settings"].get("character_review_required"):
+                validate_text_review(pilot.get("evidence", {}), Path(first_job["clip_path"]), project)
+            validate_ad_review(project, pilot.get("evidence", {}), video=Path(first_job["clip_path"]))
     config = read_json(args.project_dir / "model-snapshot.json")
     _require_snapshot_provider(config, getattr(args, "provider", None))
     _verify_plan_digest(project)
@@ -1463,7 +1477,7 @@ def command_poll(args: argparse.Namespace) -> None:
     jobs_path = args.project_dir / "jobs.json"
     jobs = read_json(jobs_path)
     clips_dir = args.project_dir / "clips"
-    pilot_waiting = bool(project["settings"].get("pilot_first")) and len(jobs["jobs"]) > 1 and not project["state"].get("pilot_review_passed")
+    pilot_waiting = bool(project["settings"].get("pilot_first")) and len(jobs["jobs"]) > 1 and not (project["state"].get("pilot_review_passed") or project["state"].get("pilot_production_checked"))
     if pilot_waiting and jobs["jobs"][0]["status"] == "planned":
         raise ValueError("请先提交首段试片")
 
@@ -1596,6 +1610,8 @@ def command_stitch(args: argparse.Namespace) -> None:
                 action=item.get('tail_action','auto')
                 if action not in {'auto','preserve'}:raise ValueError('tail_action 无效')
                 edits.append(tail_decision(clip,segment['script'],item['cues'],audio_report,preserve=action=='preserve'))
+        if project['settings'].get('review_mode') == 'continuous_candidate':
+            edits = [_production_clearance(args.project_dir, project, index)['tail_edit'] for index in range(len(clips))]
         report = stitch(clips, output, args.project_dir / "work" / "stitch", project["settings"]["aspect_ratio"], edits=edits)
     report["duration_checks"] = _duration_review_checks(report["output"]["duration_seconds"], project["plan"], project["route"])
     report["candidate_sha256"] = sha256_file(output)
@@ -1967,6 +1983,53 @@ def command_inspect_audio(args: argparse.Namespace) -> None:
     print(json.dumps({'audio_checks':results,'perceptual_review':'pending','new_paid_requests':0},ensure_ascii=False,indent=2))
 
 
+def _production_clearance(root, project, index):
+    from production_review import validate
+    if project['settings'].get('review_mode') != 'continuous_candidate':
+        raise ValueError('本项目未确认连续候选制作，不可自动升级旧合同')
+    _verify_plan_digest(project)
+    job = read_json(root/'jobs.json')['jobs'][index]
+    path = root/'production-qc'/job['shot_id']/'clearance.json'
+    evidence = read_json(require_file(path, '继续制作检查'))
+    return validate(evidence, Path(job['clip_path']), project['plan']['segments'][index]['script'], project['contract_digest'])
+
+
+def command_inspect_production(args):
+    from production_review import inspect
+    project = load_project(args.project_dir)
+    if project['settings'].get('review_mode') != 'continuous_candidate':
+        raise ValueError('本项目未确认连续候选制作')
+    _verify_plan_digest(project)
+    results = []
+    for index, job in enumerate(read_json(args.project_dir/'jobs.json')['jobs']):
+        if job['status'] not in {'downloaded', 'verified'}:continue
+        folder = args.project_dir/'production-qc'/job['shot_id']
+        if (folder/'clearance.json').is_file():
+            _production_clearance(args.project_dir, project, index)
+            continue
+        result = inspect(Path(job['clip_path']), project['plan']['segments'][index]['script'], folder, project['contract_digest'])
+        results.append({'shot':job['shot_id'], **result})
+    print(json.dumps({'checks':results,'new_authorization_required':False,'business_accepted':False},ensure_ascii=False,indent=2))
+
+
+def command_review_production(args):
+    from production_review import validate
+    project = load_project(args.project_dir)
+    if project['settings'].get('review_mode') != 'continuous_candidate':raise ValueError('未确认连续候选制作')
+    _verify_plan_digest(project)
+    jobs = read_json(args.project_dir/'jobs.json')['jobs']
+    index = next((i for i,j in enumerate(jobs) if j['shot_id']==args.shot), None)
+    if index is None or jobs[index]['status'] not in {'downloaded','verified'}:raise ValueError('指定片段尚未下载')
+    evidence = read_json(require_file(args.evidence_file, '继续制作检查'))
+    validate(evidence, Path(jobs[index]['clip_path']), project['plan']['segments'][index]['script'], project['contract_digest'])
+    atomic_write_json(args.project_dir/'production-qc'/args.shot/'clearance.json', evidence)
+    if index == 0 and project['state']['stage'] == 'pilot_review_pending':
+        project['state']['pilot_production_checked'] = True
+        project['state']['stage'] = 'production_started'
+        save_project(args.project_dir, project)
+    print('继续制作检查通过；主观验收仍 pending。直接 advance，无需再确认下一段或拼接。')
+
+
 def command_advance(args: argparse.Namespace) -> None:
     """No new authorization: run until a provider wait or genuine review boundary."""
     def invoke(command,*extra):
@@ -1981,18 +2044,23 @@ def command_advance(args: argparse.Namespace) -> None:
         if stage=='production_started':
             jobs=read_json(args.project_dir/'jobs.json')['jobs']
             pilot=project['settings'].get('pilot_first') and len(jobs)>1
-            if any(j['status']=='planned' for j in jobs) and (not pilot or project['state'].get('pilot_review_passed')):
+            if any(j['status']=='planned' for j in jobs) and (not pilot or project['state'].get('pilot_review_passed') or project['state'].get('pilot_production_checked')):
                 invoke('submit')
             invoke('poll','--max-polls','1')
             if load_project(args.project_dir)['state']['stage']==stage:
                 print('等待服务商原任务完成；稍后再次 advance，不需要重复确认。');return
             continue
         if stage=='pilot_review_pending':
+            if project['settings'].get('review_mode') == 'continuous_candidate':
+                invoke('inspect-production');return
             if args.pilot_evidence:
                 invoke('review-pilot','--evidence-file',str(args.pilot_evidence));continue
             invoke('inspect-audio')
             print('首段待真实看听：AI 完成 review-pilot 后再次 advance；不是新的制作授权。');return
         if stage=='clips_downloaded':
+            if project['settings'].get('review_mode') == 'continuous_candidate':
+                if not all((args.project_dir/'production-qc'/j['shot_id']/'clearance.json').is_file() for j in read_json(args.project_dir/'jobs.json')['jobs']):
+                    invoke('inspect-production');return
             invoke('inspect-audio')
             extra=['--tail-evidence-file',str(args.tail_evidence_file)] if args.tail_evidence_file else []
             invoke('stitch',*extra);continue
@@ -2048,6 +2116,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--video-prompt-spec", type=Path, help="结构化视频提示词方案 JSON")
     prepare.add_argument("--allow-legacy-performance-plan", action="store_true", help="仅用于迁移旧流程；新数字人口播默认要求每段真实台词表演节拍")
     prepare.add_argument("--no-pilot-first", action="store_true", help="仅供兼容旧流程；多段新项目默认先检查首段试片")
+    prepare.add_argument('--review-mode', choices=['auto','full_per_segment','continuous_candidate'], default='auto', help='新普通口播默认连续制作候选片，主观看听统一留到全片验收；广告等保留完整关卡')
     prepare.add_argument("--preset-voice", action="append", help="最多 3 个 xAI 预设 voice_id；MikuAPI 透传验收前不会进入付费预检")
     prepare.add_argument("--voice-mode", choices=["model_generated", "preset_voice", "reference_timbre", "locked_audio"], help="显式选择声音；现有网关只执行已验证范围，参考音色/严格音轨请先使用多模型规划入口")
     prepare.add_argument(
@@ -2136,6 +2205,13 @@ def build_parser() -> argparse.ArgumentParser:
     poll.add_argument("--interval", type=float, default=5.0)
     poll.add_argument("--max-polls", type=int, default=120)
     poll.set_defaults(handler=command_poll)
+
+    production_inspect = subparsers.add_parser('inspect-production')
+    production_inspect.set_defaults(handler=command_inspect_production)
+    production_review = subparsers.add_parser('review-production')
+    production_review.add_argument('--shot', required=True)
+    production_review.add_argument('--evidence-file', type=Path, required=True)
+    production_review.set_defaults(handler=command_review_production)
 
     pilot_review = subparsers.add_parser("review-pilot")
     pilot_review.add_argument("--evidence-file", type=Path, required=True, help="首段正常速度完整看听后的逐项观察 JSON")

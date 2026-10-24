@@ -12,6 +12,7 @@ configure()
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REQUIRED = [
     "VERSION", "scripts/console_utf8.py",
+    "scripts/text_worker.py", "scripts/production_review.py", "references/continuous-production.md",
     "scripts/runtime_tools.py", "scripts/setup_environment.py", "scripts/run.py",
     "scripts/doctor.py", "scripts/audio_qc.py", "scripts/audio_worker.py",
     "requirements-runtime.txt", "references/automatic-quality.md",

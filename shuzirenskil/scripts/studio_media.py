@@ -56,8 +56,10 @@ def stamp(seconds):
     return f'{h:02d}:{m:02d}:{s:02d},{ms:03d}'
 
 
-def write_subtitles(cues, duration, expected_text, path):
+def write_subtitles(cues, duration, expected_text, path, *, machine_candidate=False):
     from production_plan import _normalized
+    if machine_candidate:
+        from audio_qc import normalized as _normalized
     if not isinstance(cues,list) or not cues:raise ValueError('缺少实际音频上的字幕时间码')
     end=0; parts=[];texts=[]
     for index,cue in enumerate(cues,1):

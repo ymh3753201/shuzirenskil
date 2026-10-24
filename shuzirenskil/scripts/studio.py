@@ -117,6 +117,9 @@ class Studio:
         return Adapter('fal' if phase=='lip' else self.plan['model_snapshot']['provider'],config,key,loopback=self.loopback)
     def preflight(self):
         self.assets_unchanged()
+        if self.plan.get('review_mode') == 'continuous_candidate' and not self.loopback:
+            from production_review import require_runtime
+            require_runtime()
         if not self.loopback:
             from media import probe
             provider=self.plan['model_snapshot']['provider']
@@ -179,6 +182,18 @@ class Studio:
         attempts.append(entry);return entry
     def verify_accepted(self,ident):
         job,record=self.job(ident)
+        if record['state'] == 'production_checked':
+            if self.plan.get('review_mode') != 'continuous_candidate':raise ValueError('未授权连续候选制作')
+            from production_review import validate
+            result = validate(record['production_review'], Path(record['clip']), job['script'], self.contract['digest'])
+            if job['index'] > 1 and record['production_review'].get('baseline_sha256') != self.verify_accepted(self.plan['jobs'][0]['job_id'])['clip_sha256']:
+                raise ValueError('继续制作观察与当前首段基准不一致')
+            if (digest_json(record['production_review']) != record.get('production_review_digest')
+                    or digest_json(result['tail_edit']) != record.get('tail_edit_digest')
+                    or digest_json(record.get('tail_edit')) != record.get('tail_edit_digest')
+                    or result['cues'] != record.get('machine_cues')):
+                raise ValueError('继续制作证据已变化')
+            return record
         if record['state']!='accepted' or not record.get('review'):raise ValueError('前置片段尚未完整验收')
         if sha256_file(Path(record['clip']))!=record['clip_sha256']:raise ValueError('已验收片段已经变化')
         if digest_json(record['review'])!=record.get('review_digest'):
@@ -395,6 +410,22 @@ class Studio:
             record.update(review=evidence,review_digest=digest_json(evidence),state='accepted')
             if edit:record.update(tail_edit=edit,tail_edit_digest=digest_json(edit))
         self.save();return {'status':record.get('state',record.get('status'))}
+    def review_production(self, ident, evidence):
+        if self.plan.get('review_mode') != 'continuous_candidate':raise ValueError('计划未确认连续候选制作；历史项目不能自动变更审核方式')
+        job, record = self.job(ident)
+        if record['state'] != 'review_pending':raise ValueError('当前片段没有待执行的继续制作检查')
+        if any(event.get('job_id') == ident and event.get('video_sha256') == record['clip_sha256'] and event.get('declared_checks_passed') is False for event in self.state.get('review_events', [])):
+            raise ValueError('同一原片已有明确失败的实际验收，不能改成主观待检继续')
+        from production_review import validate
+        result = validate(evidence, Path(record['clip']), job['script'], self.contract['digest'])
+        if job['index'] > 1 and evidence.get('baseline_sha256') != self.verify_accepted(self.plan['jobs'][0]['job_id'])['clip_sha256']:
+            raise ValueError('继续制作观察未绑定当前首段基准')
+        record.update(state='production_checked', production_review=evidence,
+            production_review_digest=digest_json(evidence), tail_edit=result['tail_edit'],
+            tail_edit_digest=digest_json(result['tail_edit']), machine_cues=result['cues'],
+            perceptual_review='pending', business_accepted=False, low_confidence_words=result['low_confidence_words'])
+        self.save()
+        return {'status':'production_checked','business_accepted':False,'next_action':'继续 advance，不询问下一段或拼接许可'}
     def revise(self,ident,evidence):
         job,record=self.job(ident);approval=self.current_approval()
         if record['state'] in {'submitted','submitting','submission_unknown','planned','lip_ready'}:raise ValueError('任务未收敛，不能重复生成；先恢复或验收已有任务')
@@ -415,8 +446,8 @@ class Studio:
         if self.plan['continuity_mode']=='cut' and job['index']==1:
             for other in self.plan['jobs'][1:]:
                 old=self.state['jobs'][other['job_id']]
-                if old['state']=='accepted':
-                    old['prior_reviews']=old.get('prior_reviews',[])+[old['review']]
+                if old['state'] in {'accepted','production_checked'}:
+                    old['prior_reviews']=old.get('prior_reviews',[])+[old.get('review') or old.get('production_review')]
                     old['state']='review_pending';old.pop('review',None);old.pop('review_digest',None)
         if self.state['final']:
             self.state.setdefault('final_history',[]).append(self.state['final']);self.state['final']=None
@@ -440,11 +471,12 @@ class Studio:
         else:
             cues=[]
             for job,segment in zip(self.plan['jobs'],result['timeline']):
-                review=self.state['jobs'][job['job_id']]['review']
+                record=self.state['jobs'][job['job_id']]
+                review=record.get('review') or {'cues':record.get('machine_cues',[])}
                 for cue in review.get('cues',[]) if job['kind']=='talking_head' else []:
                     cues.append({**cue,'start_seconds':cue['start_seconds']+segment['start_seconds'],'end_seconds':cue['end_seconds']+segment['start_seconds']})
         script=''.join(job['script'] for job in self.plan['jobs'])
-        write_subtitles(cues,max(result['duration_seconds'],self.plan.get('audio_plan',{}).get('delivery_audio_seconds',0) if self.plan.get('audio_plan') else 0),script,folder/'subtitles.srt')
+        write_subtitles(cues,max(result['duration_seconds'],self.plan.get('audio_plan',{}).get('delivery_audio_seconds',0) if self.plan.get('audio_plan') else 0),script,folder/'subtitles.srt',machine_candidate=self.plan.get('review_mode')=='continuous_candidate')
         if result.get('lossless_audio_video'):
             result['additional_file_hashes']={str(p):sha256_file(p) for p in [Path(result['lossless_audio_video']),folder/'master.wav']}
         result['subtitles']=str(folder/'subtitles.srt');result['subtitles_sha256']=sha256_file(folder/'subtitles.srt')
@@ -480,7 +512,7 @@ class Studio:
         """Advance existing authorization to the next genuine external/review boundary."""
         review_dir=Path(review_dir).resolve() if review_dir else self.root/'completed-reviews'
         for _ in range(len(self.plan['jobs'])*8+8):
-            pending=next((j for j in self.plan['jobs'] if self.state['jobs'][j['job_id']]['state']!='accepted'),None)
+            pending=next((j for j in self.plan['jobs'] if self.state['jobs'][j['job_id']]['state'] not in {'accepted','production_checked'}),None)
             if pending:
                 ident=pending['job_id'];record=self.state['jobs'][ident];state=record['state']
                 if state in {'planned','lip_ready'}:
@@ -491,6 +523,17 @@ class Studio:
                     if result['status']=='pending':return {'status':'waiting_provider','job_id':ident,'next_action':'稍后再次 advance；只查询原任务，不增加确认或重复提交'}
                     continue
                 if state in {'review_pending','base_review_pending'}:
+                    if self.plan.get('review_mode') == 'continuous_candidate' and state == 'review_pending':
+                        evidence=review_dir/f"production-{ident}-{record['clip_sha256'][:16]}.json"
+                        if evidence.is_file():
+                            self.review_production(ident,read_json(evidence));continue
+                        from production_review import inspect
+                        result=inspect(Path(record['clip']),pending['script'],self.root/'production-qc'/ident,self.contract['digest'])
+                        if pending['index'] > 1:
+                            path=Path(result['production_review_template']);template=read_json(path)
+                            template['baseline_sha256']=self.verify_accepted(self.plan['jobs'][0]['job_id'])['clip_sha256']
+                            atomic_write_json(path,template)
+                        return {**result,'job_id':ident,'evidence_destination':str(evidence)}
                     evidence=review_dir/f"{ident}-{record['clip_sha256'][:16]}.json"
                     if evidence.is_file():
                         self.review(ident,read_json(evidence))
@@ -512,7 +555,7 @@ class Studio:
 
 def main():
     parser=argparse.ArgumentParser(description='多模型生产执行；一次提交、显式授权、逐段验收')
-    parser.add_argument('command',choices=['prepare','authorize','submit','poll','recover','context','inspect','review','revise','assemble','status','deliver','preflight','advance'])
+    parser.add_argument('command',choices=['prepare','authorize','submit','poll','recover','context','inspect','review','review-production','revise','assemble','status','deliver','preflight','advance'])
     parser.add_argument('--project',type=Path,required=True);parser.add_argument('--spec',type=Path);parser.add_argument('--config',type=Path)
     parser.add_argument('--job');parser.add_argument('--evidence',type=Path);parser.add_argument('--env-file',type=Path);parser.add_argument('--bindings',type=Path)
     parser.add_argument('--review-dir',type=Path)
@@ -528,13 +571,13 @@ def main():
                 elif args.command in {'submit','poll','context','inspect'}:
                     if not args.job:raise ValueError('需要 --job')
                     result=getattr(studio,args.command)(args.job)
-                elif args.command in {'authorize','recover','review','revise'}:
+                elif args.command in {'authorize','recover','review','review-production','revise'}:
                     if not args.evidence:raise ValueError('需要 --evidence 文件')
                     evidence=read_json(args.evidence)
                     if args.command=='authorize':result=studio.authorize(evidence)
                     else:
                         if not args.job:raise ValueError('需要 --job')
-                        result=getattr(studio,args.command)(args.job,evidence)
+                        result=getattr(studio,args.command.replace('-', '_'))(args.job,evidence)
                 else:result=getattr(studio,args.command)()
         print(json.dumps(result,ensure_ascii=False,indent=2));return 0
     except (ValueError,OSError,KeyError,TransportError) as exc:

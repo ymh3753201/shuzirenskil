@@ -352,7 +352,7 @@ def retime_short_exact_candidate(
     }
 
 
-def extract_review_frames(video: Path, output_dir: Path, extra_times: list[float] | None = None) -> list[str]:
+def extract_review_frames(video: Path, output_dir: Path, extra_times: list[float] | None = None, *, extra_indices: list[int] | None = None) -> list[str]:
     """真实帧索引取样：首末帧、全程每半秒、末两秒每四分之一秒和接缝。"""
     ffmpeg = require_command("ffmpeg")
     data = json.loads(run([require_command("ffprobe"), "-v", "error", "-select_streams", "v:0",
@@ -374,6 +374,9 @@ def extract_review_frames(video: Path, output_dir: Path, extra_times: list[float
     for value in extra_times or []:
         add_at(value - 0.12, "boundary")
         add_at(value + 0.12, "boundary")
+    for index in extra_indices or []:
+        if type(index) is not int or not 0 <= index < len(times):raise ValueError('额外检查帧号越界')
+        selected.setdefault(index, set()).add('ocr_finding')
     output_dir.mkdir(parents=True, exist_ok=True)
     indices = sorted(selected)
     expression = "+".join(f"eq(n\\,{index})" for index in indices)
