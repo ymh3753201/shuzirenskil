@@ -1521,7 +1521,10 @@ def command_poll(args: argparse.Namespace) -> None:
         if pilot_waiting and jobs["jobs"][0]["status"] in {"downloaded", "verified"}:
             project["state"]["stage"] = "pilot_review_pending"
             save_project(args.project_dir, project)
-            print("首段试片已下载；请正常速度看完整段、听完整段并运行 review-pilot。")
+            if project['settings'].get('review_mode') == 'continuous_candidate':
+                print('首段已下载；继续 advance 完成 AI 的继续制作检查，再自动生成后续片段；不逐段请用户听审或确认。')
+            else:
+                print("首段试片已下载；请正常速度看完整段、听完整段并运行 review-pilot。")
             return
         if all(item["status"] in {"downloaded", "verified"} for item in jobs["jobs"]):
             project["state"]["stage"] = "clips_downloaded"

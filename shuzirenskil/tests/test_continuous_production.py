@@ -170,7 +170,10 @@ class LegacyContinuousTests(unittest.TestCase):
             with patch('production_review.require_runtime'):workflow.command_preflight(args)
             clip=f.root/'fixture.mp4';fixture.video(clip,2,dimensions='720x1280',fps=24)
             legacy.FakeHandler.video_bytes=clip.read_bytes()
-            f.run_cli(root,'submit',api_key=True);f.run_cli(root,'poll','--max-polls','1',api_key=True)
+            f.run_cli(root,'submit',api_key=True)
+            polled=f.run_cli(root,'poll','--max-polls','1',api_key=True)
+            self.assertIn('继续制作检查',polled.stdout)
+            self.assertNotIn('review-pilot',polled.stdout)
             project=read_json(root/'project.json')
             def clear(index):
                 job=read_json(root/'jobs.json')['jobs'][index]

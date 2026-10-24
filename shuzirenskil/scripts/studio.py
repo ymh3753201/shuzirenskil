@@ -242,7 +242,7 @@ class Studio:
             tail=self.root/f"context-{job['job_id']}-r{record['revision']}.mp4"
             context=context_clip(Path(previous['clip']),tail,end_seconds=previous.get('tail_edit',{}).get('end_seconds'))
             uri=resolve(context['path'],context['sha256'],bindings,require_url=profile['provider']=='aliyun',loopback=self.loopback)
-            note='参考视频为上一段已验收结尾，只生成其后新的画面，不重播参考片段。原始参考图仍是人物身份基准。'
+            note='参考视频为上一段已完成制作检查的结尾，只生成其后新的画面，不重播参考片段。原始参考图仍是人物身份基准。'
             if profile['provider']=='aliyun':
                 payload['input']['media'].append({'type':'reference_video','url':uri});payload['input']['prompt']+='\n'+note
             else:
@@ -554,7 +554,7 @@ class Studio:
 
 
 def main():
-    parser=argparse.ArgumentParser(description='多模型生产执行；一次提交、显式授权、逐段验收')
+    parser=argparse.ArgumentParser(description='多模型生产执行；一次提交、制作检查、全片最终验收')
     parser.add_argument('command',choices=['prepare','authorize','submit','poll','recover','context','inspect','review','review-production','revise','assemble','status','deliver','preflight','advance'])
     parser.add_argument('--project',type=Path,required=True);parser.add_argument('--spec',type=Path);parser.add_argument('--config',type=Path)
     parser.add_argument('--job');parser.add_argument('--evidence',type=Path);parser.add_argument('--env-file',type=Path);parser.add_argument('--bindings',type=Path)
