@@ -76,6 +76,9 @@ class LocalProvider:
 
 class StudioTests(unittest.TestCase):
     def setUp(self):
+        from text_fixture import synthetic_text_inspection
+        self.ocr_mock = patch('studio.inspect_text', side_effect=synthetic_text_inspection)
+        self.ocr_mock.start()
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.remote=LocalProvider(self.root)
         command(['ffmpeg','-v','error','-y','-f','lavfi','-i','color=s=32x56','-frames:v','1',str(self.root/'person.png')])
         wav(self.root/'master.wav',7)
@@ -90,7 +93,7 @@ class StudioTests(unittest.TestCase):
                      'lip_sync':{'base_url':self.remote.url,'key_env':'STUDIO_TEST_KEY'},
                      'expected_dimensions':[32,56],'expected_fps':8,'test_mode':True}
         self.env=patch.dict(os.environ,{'STUDIO_TEST_KEY':'synthetic-local-only'});self.env.start()
-    def tearDown(self):self.env.stop();self.remote.close();self.temp.cleanup()
+    def tearDown(self):self.ocr_mock.stop();self.env.stop();self.remote.close();self.temp.cleanup()
     def prepare(self,locked=False):
         if locked:
             self.spec['voice']={'mode':'locked_audio','audio_asset':'voice','consistency':'strict'}
@@ -108,9 +111,11 @@ class StudioTests(unittest.TestCase):
         return value
     def approve(self,s):s.authorize(self.approval(s))
     def accept(self,s,ident):
+        from text_fixture import viewed_indices
         template=s.inspect(ident);e=read_json(Path(template['review_template']));e.update(reviewer='agent_audiovisual',full_playback=True,review_seconds=10,all_segments_and_seams_reviewed=True)
         for v in e['checks'].values():v.update(status='pass',observations='仅模拟测试检查记录，不代表真实观看与效果验收。')
         e['text_review'].update(reviewer='agent_visual',full_video_viewed=True,all_sampled_frames_viewed=True,last_frame_viewed=True,text_present=False,observations='仅模拟测试检查记录，不代表真实看图结论。')
+        e['text_review']['reviewed_frame_indices'] = viewed_indices(e['text_review'])
         if ident!='final':
             job,record=s.job(ident);e['transcript']=job['script'];e['cues']=[{'start_seconds':0.1,'end_seconds':record['technical']['seconds']-0.2,'text':job['script']}]
         s.review(ident,e)

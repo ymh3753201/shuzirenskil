@@ -36,7 +36,7 @@ class VideoPromptTests(unittest.TestCase):
         prompt = build_video_prompt(segment={"index": 1, "script": "喜欢自己。"}, language="普通话", continuity=None, prompt_spec=spec, generation_mode="image-to-video")
         self.assertIn(NO_TEXT_RULE, prompt)
 
-    def test_old_schema_keeps_its_prompt_and_signature_contract(self) -> None:
+    def test_old_schema_keeps_voice_signature_but_new_compilation_is_text_free(self) -> None:
         import hashlib, json
         spec = default_prompt_spec()
         spec["schema_version"] = "2.0"
@@ -45,7 +45,7 @@ class VideoPromptTests(unittest.TestCase):
         self.assertEqual(voice_signature(spec), expected)
         self.assertNotIn("voice_casting", validate_prompt_spec(spec))
         prompt = build_video_prompt(segment={"index": 1, "script": "你好。"}, language="普通话", continuity=None, prompt_spec=spec, generation_mode="image-to-video")
-        self.assertNotIn(NO_TEXT_RULE, prompt)
+        self.assertIn(NO_TEXT_RULE, prompt)
 
     def test_prompt_has_professional_visual_speech_audio_and_safety_sections(self) -> None:
         prompt = build_video_prompt(
@@ -83,7 +83,8 @@ class VideoPromptTests(unittest.TestCase):
             segment={"index": 1, "script": "这样就能省下时间。"}, language="中文", continuity=None,
             prompt_spec=spec, generation_mode="image-to-video",
         )
-        self.assertIn("说到‘省下时间’时", prompt)
+        self.assertEqual(prompt.count('省下时间'), 1)
+        self.assertIn('声音原文第5至8个字符说出时', prompt)
         self.assertIn("允许随句意自然变化语调、语速和情绪", prompt)
         with self.assertRaisesRegex(ValueError, "触发词不在本段台词"):
             build_video_prompt(

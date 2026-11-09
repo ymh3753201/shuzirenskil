@@ -7,6 +7,10 @@
     "all_sampled_frames_viewed": false,
     "last_frame_viewed": false,
     "text_present": null,
-    "observations": "实际看完后填写；任何文字出现即失败，无法确认保持 pending"
+    "observations": "实际看完后填写；任何文字出现即失败，无法确认保持 pending",
+    "text_qc_file": "",
+    "text_qc_sha256": "",
+    "reviewed_frame_indices": [],
+    "ocr_findings_review": []
   }
 }

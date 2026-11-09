@@ -52,18 +52,17 @@ class AdContractTests(unittest.TestCase):
                         "canonical_reference": {"sha256": "image1"}, "reference_roles": ["identity", "scene"],
                         "settings": {"purpose": "storefront_ad", "generation_mode": "reference-to-video", "voice_signature": "voice1"}}
 
-    def test_signage_is_preserved_without_contradictory_global_ban(self):
-        rendered = prompt(self.spec)
-        self.assertIn("智慧城市自助洗车", rendered)
-        self.assertIn("禁止顶部照片条", rendered)
-        self.assertNotIn(NO_TEXT_RULE, rendered)
-        self.assertNotIn(default_prompt_spec()["negative_constraints"][1], rendered)
-        self.spec["negative_constraints"] = ["禁止任何文字"]
-        with self.assertRaises(ValueError):
+    def test_new_generation_rejects_historical_signage_whitelist(self):
+        with self.assertRaisesRegex(ValueError, "原生文字白名单"):
             prompt(self.spec)
+        self.spec["ad_contract"]["source_text"] = []
+        rendered = prompt(self.spec)
+        self.assertIn(NO_TEXT_RULE, rendered)
+        self.assertIn("禁止顶部照片条", rendered)
 
     def test_custom_negatives_cannot_remove_space_rule(self):
         self.spec["negative_constraints"] = ["避免闪烁"]
+        self.spec["ad_contract"]["source_text"] = []
         self.assertIn("后期插入或叠加用户静态图片", prompt(self.spec))
         self.spec["ad_contract"]["source_text"] = []
         self.assertIn(NO_TEXT_RULE, prompt(self.spec))
@@ -76,10 +75,12 @@ class AdContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             prompt(self.spec, ["identity"])
         product = ad_spec("product_ad")
+        product["ad_contract"]["source_text"] = []
         with self.assertRaises(ValueError):
             prompt(product)
         self.assertIn("同一透视", prompt(product, ["identity", "product"]))
         company = ad_spec("company_ad")
+        company["ad_contract"]["source_text"] = []
         self.assertIn("同一透视", prompt(company))
 
     def test_wrong_reference_index_and_unversioned_ad_are_rejected(self):

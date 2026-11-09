@@ -202,7 +202,7 @@ def get_status(base_url: str, path: str, api_key: str, timeout: float) -> tuple[
 
 def extract_video_url(value: dict[str, Any]) -> str | None:
     return _first_string(value, (
-        ("download_url",), ("video_url",), ("url",), ("video", "url"),
+        ("metadata", "url"), ("download_url",), ("video_url",), ("url",), ("video", "url"),
         ("video", "download_url"), ("result", "download_url"),
         ("result", "video_url"), ("result", "url"),
         ("data", "download_url"), ("data", "video_url"), ("data", "url"),
@@ -229,9 +229,17 @@ def download_content(base_url: str, path: str, api_key: str, output: Path, timeo
     _download_response(request, output, timeout)
 
 
+class _SafeMediaRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None and urlsplit(req.full_url).netloc != urlsplit(newurl).netloc:
+            redirected.remove_header('Authorization')
+        return redirected
+
+
 def _download_response(request: urllib.request.Request, output: Path, timeout: float) -> None:
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.build_opener(_SafeMediaRedirect()).open(request, timeout=timeout) as response:
             content_type = response.headers.get("Content-Type", "")
             data = response.read(MAX_VIDEO_BYTES + 1)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:

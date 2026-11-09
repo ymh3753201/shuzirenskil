@@ -140,6 +140,22 @@ class ProductionTests(unittest.TestCase):
         self.assertNotIn("voice", result["assets"])
         self.assertNotIn("reference_audio", json.dumps(result["jobs"]))
 
+    def test_all_compiler_routes_keep_audio_separate_and_mandatory_no_text(self):
+        from text_policy import require_guarded_prompt, ENDING
+        for profile_id in ('wan3-reference', 'minimax-h3-reference', 'seedance25-reference', 'veo31-reference', '91topgo-grok-reference'):
+            spec = copy.deepcopy(self.spec)
+            spec['model_profile'] = profile_id
+            spec['resolution'] = get_profile(profile_id)['resolutions'][0]
+            result = build_plan(spec, self.root)
+            for job in result['jobs']:
+                body = job['request_preview']['payload']
+                prompt = (body.get('prompt') or body.get('input', {}).get('prompt')
+                          or (body.get('content') or [{}])[0].get('text')
+                          or (body.get('instances') or [{}])[0].get('prompt'))
+                require_guarded_prompt(prompt)
+                self.assertTrue(prompt.endswith(ENDING))
+                self.assertIn('<SPOKEN_AUDIO_ONLY>\n' + job['script'] + '\n</SPOKEN_AUDIO_ONLY>', prompt)
+
     def test_explicit_reference_audio_uses_same_asset_all_segments(self):
         self.spec["voice"] = {"mode": "reference_timbre", "audio_asset": "voice"}
         self.spec["script"] = "这段内容介绍门店服务的具体流程与实际体验。" * 12
@@ -215,9 +231,13 @@ class ProductionTests(unittest.TestCase):
             build_plan(self.spec, self.root)
         self.spec["assets"]["scene"] = {"path": "person.png", "kind": "image", "role": "scene"}
         self.spec["reference_images"].append("scene")
+        with self.assertRaisesRegex(ValueError, "原生文字白名单"):
+            build_plan(self.spec, self.root)
+        self.spec["ad_contract"]["source_text"] = []
         result = build_plan(self.spec, self.root)
         prompt = result["jobs"][0]["request_preview"]["payload"]["input"]["prompt"]
-        self.assertIn("智慧城市自助洗车", prompt)
+        from text_policy import NO_TEXT_RULE
+        self.assertIn(NO_TEXT_RULE, prompt)
         self.assertIn("禁止顶部照片条", prompt)
         self.assertNotIn("不出现字幕、文字、Logo", prompt)
         self.spec["ad_contract"].pop("claim_evidence")

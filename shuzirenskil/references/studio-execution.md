@@ -1,5 +1,8 @@
 # 多模型完整执行指南（2026-10-18）
 
+> 2026-11-06 更新：所有新生成画面全程无字，普通口播与广告一致。本文旧原生文字白名单仅供历史记录追溯，不能据此创建新请求；详见 [全程无字生成规则](text-free-generation.md)。
+
+
 rc7：普通原生声音连续制作先读 `continuous-production.md`，spec 在首次确认前写 `review_mode=continuous_candidate`；该模式用 review-production 放行候选片制作，全片 review/deliver 的真实验收保留。以下逐段完整听审是 full_per_segment、广告及严格音轨的路径。
 
 

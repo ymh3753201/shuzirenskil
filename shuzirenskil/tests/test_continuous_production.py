@@ -133,6 +133,56 @@ class ContinuousTests(unittest.TestCase):
         self.assertTrue(record['low_confidence_words'])
         self.assertEqual(record['perceptual_review'],'pending')
         self.assertFalse(record['business_accepted'])
+    def human_review_fixture(self):
+        s,e = self.start();path=Path(e['audio_qc_file']);audio=read_json(path)
+        script=s.plan['jobs'][0]['script']
+        cues=copy.deepcopy(audio['recognition']['cues'])
+        audio['recognition']['transcript']='模拟机器误识别。'
+        audio['recognition']['cues'][0]['text']='模拟机器误识别。'
+        atomic_write_json(path,audio);e['audio_qc_sha256']=sha256_file(path)
+        e['human_transcript_review']={'reviewer':'human_user', 'video_sha256':e['video_sha256'],
+            'audio_qc_sha256':e['audio_qc_sha256'], 'contract_digest':e['contract_digest'],
+            'full_playback':True,'script_verified':True,'transcript':script,'cues':cues,
+            'user_statement':'模拟用户：已经实听核对，原片台词正确，可以继续。',
+            'observations':'仅测试真实用户证据绑定，不代表任何真实视频已通过。'}
+        return s,e,path
+    def test_user_verified_transcript_keeps_raw_asr_and_does_not_trim(self):
+        s,e,path=self.human_review_fixture();original=path.read_bytes()
+        s.review_production('segment_0001',e)
+        self.assertEqual(path.read_bytes(),original)
+        record=s.state['jobs']['segment_0001']
+        self.assertFalse(record['tail_edit']['trim'])
+        self.assertFalse(record['business_accepted'])
+        self.assertEqual(record['perceptual_review'],'pending')
+    def test_user_review_cannot_bypass_bindings_timing_text_or_failures(self):
+        s,e,path=self.human_review_fixture()
+        for key,value in [('reviewer','agent_visual'),('video_sha256','stale'),
+                          ('audio_qc_sha256','stale'),('contract_digest','stale'),
+                          ('full_playback',False),('script_verified',False),('transcript','错误内容')]:
+            changed=copy.deepcopy(e);changed['human_transcript_review'][key]=value
+            with self.subTest(key=key),self.assertRaises(ValueError):s.review_production('segment_0001',changed)
+        changed=copy.deepcopy(e);changed['human_transcript_review']['cues'][0]['start_seconds']+=0.01
+        with self.assertRaises(ValueError):s.review_production('segment_0001',changed)
+        for update in [{'text_present':True},{'checks':{'lip_sync':{'status':'fail'}}}]:
+            with self.assertRaises(ValueError):s.review_production('segment_0001',{**e,**update})
+    def test_user_auto_tail_requires_uncorrected_strong_ending(self):
+        s,e,path=self.human_review_fixture();r=read_json(path)
+        review=e['human_transcript_review'];script=review['transcript']
+        start=0.1;end=r['recognition']['cues'][-1]['end_seconds'];mid=(start+end)/2
+        r['recognition']['cues']=[{'start_seconds':start,'end_seconds':mid,'text':'误识'},
+                                 {'start_seconds':mid,'end_seconds':end,'text':script[1:]}]
+        r['recognition']['transcript']='误识'+script[1:]
+        r['recognition']['words']=[{'text':'模拟','start_seconds':start+(end-start)*i/3,
+            'end_seconds':start+(end-start)*(i+1)/3,'probability':0.99} for i in range(3)]
+        review.update(tail_action='auto',cues=[{'start_seconds':start,'end_seconds':mid,'text':script[:1]},
+                                             {'start_seconds':mid,'end_seconds':end,'text':script[1:]}])
+        for weak in (False,True):
+            r['recognition']['words'][-1]['probability']=0.3 if weak else 0.99
+            atomic_write_json(path,r);e['audio_qc_sha256']=sha256_file(path)
+            review['audio_qc_sha256']=e['audio_qc_sha256']
+            with patch('production_review.tail_decision',wraps=pr.tail_decision) as decision:
+                pr.validate(e,Path(read_json(Path(e['manifest_file']))['video']),script,e['contract_digest'])
+                self.assertEqual(decision.call_args.kwargs['preserve'],weak)
     def test_old_contract_cannot_use_candidate_clearance(self):
         self.f.spec['review_mode']='full_per_segment';s=self.f.prepare();self.f.approve(s);s.advance()
         with self.assertRaisesRegex(ValueError,'未确认'):s.review_production('segment_0001',{})

@@ -74,8 +74,33 @@ def validate(evidence, video, script, binding):
     if not evidence_valid(audio, video, script) or audio.get('status') != 'automatic_checks_completed':
         raise ValueError('音频检查未完成')
     recognition = audio['recognition']
-    if not normalized(script) or normalized(recognition.get('transcript', '')) != normalized(script):
-        raise ValueError('实际识别台词与确认稿不符；不得用确认稿覆盖识别结果')
+    transcript = recognition.get('transcript', '')
+    corrected_cues = None
+    human_review = None
+    if not normalized(script):
+        raise ValueError('确认稿不能为空')
+    if normalized(transcript) != normalized(script):
+        # Keep raw ASR immutable. A real user's response to a disclosed mismatch
+        # can verify the existing clip; it is not an automatic fuzzy match.
+        human_review = evidence.get('human_transcript_review', {})
+        if (human_review.get('reviewer') != 'human_user'
+                or human_review.get('video_sha256') != sha256_file(video)
+                or human_review.get('audio_qc_sha256') != evidence['audio_qc_sha256']
+                or human_review.get('contract_digest') != binding
+                or human_review.get('full_playback') is not True
+                or human_review.get('script_verified') is not True
+                or normalized(human_review.get('transcript', '')) != normalized(script)
+                or len(human_review.get('user_statement', '').strip()) < 8
+                or len(human_review.get('observations', '').strip()) < 8):
+            raise ValueError('实际识别台词与确认稿不符；须保留原识别并提供绑定本片的真实用户实听核对')
+        corrected_cues = human_review.get('cues', [])
+        raw_cues = recognition.get('cues', [])
+        if (not corrected_cues or len(corrected_cues) != len(raw_cues)
+                or any(c.get('start_seconds') != raw.get('start_seconds')
+                       or c.get('end_seconds') != raw.get('end_seconds')
+                       for c, raw in zip(corrected_cues, raw_cues))
+                or normalized(''.join(c.get('text', '') for c in corrected_cues)) != normalized(script)):
+            raise ValueError('实听修正须保留原句时间码，完整对应确认稿，不得改写原识别文件')
     technical = audio.get('technical', {})
     if not technical.get('has_audio') or not technical.get('has_video'):
         raise ValueError('视频缺画面或音轨')
@@ -125,12 +150,27 @@ def validate(evidence, video, script, binding):
                 or not math.isfinite(start) or not math.isfinite(end) or not previous <= start < end <= duration+0.05):
             raise ValueError('语音时间码无效或重叠')
         previous = end
-    if normalized(''.join(c['text'] for c in cues)) != normalized(script):
+    if normalized(''.join(c['text'] for c in cues)) != normalized(transcript):
         raise ValueError('时间码文本与实际识别不一致')
     if any(type(w.get('probability')) not in (int, float) or not math.isfinite(w['probability']) or not 0 <= w['probability'] <= 1 for w in words):
         raise ValueError('识别置信度证据无效')
+    # User-approved ASR spelling corrections do not authorize guessing an ending.
+    # Silence-only trimming may be requested when the final cue was not corrected
+    # and raw word/VAD timing independently protects the audible ending.
+    preserve_tail = bool(human_review)
+    if human_review and human_review.get('tail_action') == 'auto':
+        endings = recognition.get('words', [])[-3:]
+        regions = recognition.get('speech_regions', [])
+        if (normalized(corrected_cues[-1]['text']) == normalized(cues[-1]['text'])
+                and len(endings) == 3 and all(w['probability'] >= 0.7 for w in endings)
+                and regions and all(type(w.get('end_seconds')) in (int, float) for w in endings)
+                and abs(max(r['end_seconds'] for r in regions)-cues[-1]['end_seconds']) <= 0.5
+                and abs(endings[-1]['end_seconds']-cues[-1]['end_seconds']) <= 0.5):
+            preserve_tail = False
     # Conservative auto tail editing retains raw recognition and evidence bindings.
-    return {'cues': cues, 'transcript': recognition['transcript'],
-            'tail_edit': tail_decision(video, script, cues, audio), 'business_accepted': False,
+    return {'cues': corrected_cues if corrected_cues is not None else cues,
+            'transcript': human_review['transcript'] if human_review else transcript,
+            'human_transcript_review': human_review,
+            'tail_edit': tail_decision(video, script, cues, audio, preserve=preserve_tail), 'business_accepted': False,
             'perceptual_review': 'pending', 'evidence_digest': digest_json(evidence),
             'low_confidence_words': [w for w in words if w['probability'] < 0.7]}

@@ -34,6 +34,9 @@ class TextReviewTests(unittest.TestCase):
         extract_review_frames(self.video, self.root / "frames", [0.5])
         self.manifest = self.root / "frames/manifest.json"
         self.evidence = {"text_review": {"manifest_file": str(self.manifest), "manifest_sha256": sha256_file(self.manifest), "reviewer": "agent_visual", "full_video_viewed": True, "all_sampled_frames_viewed": True, "last_frame_viewed": True, "text_present": False, "observations": "纯色测试视频，模拟已检查每个必要位置的画面。"}}
+        from text_fixture import synthetic_text_inspection, viewed_indices
+        inspection = synthetic_text_inspection(self.video, self.root / 'frames', [0.5])
+        self.evidence['text_review'].update(inspection, reviewed_frame_indices=viewed_indices(inspection))
 
     def tearDown(self):
         self.temp.cleanup()

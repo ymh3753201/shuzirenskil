@@ -22,6 +22,9 @@ from studio_assets import load_bindings, resolve, unexpired, utc_stamp
 from studio_media import check_clip, context_clip, render, write_subtitles
 from audio_qc import inspect_audio, tail_decision, evidence_valid
 from runtime_tools import capabilities
+from generation_gates import require_no_quality_failure, record_confirmed_text_failure
+from text_policy import require_guarded_prompt
+from text_inspection import inspect_text
 
 CHECKS=('identity','wardrobe_scene','motion','product_facts','visual_text','normal_speed_playback','continuity')
 AUDIO_CHECKS=('script_complete','voice_identity','voice_naturalness','lip_sync','pacing')
@@ -199,6 +202,7 @@ class Studio:
         if digest_json(record['review'])!=record.get('review_digest'):
             raise ValueError('已验收记录已经变化，需要重新验收')
         if record['review'].get('video_sha256')!=record['clip_sha256']:raise ValueError('验收不匹配视频')
+        validate_text_review(record['review'], Path(record['clip']), {'video_prompt_spec': {'ad_contract': self.plan.get('ad_contract')}, 'settings': {'purpose': self.plan['purpose']}})
         if record.get('tail_edit') and (digest_json(record['tail_edit'])!=record.get('tail_edit_digest') or record['tail_edit']['source_sha256']!=record['clip_sha256']):
             raise ValueError('裁尾证据已经变化，需要重新检查')
         return record
@@ -256,7 +260,14 @@ class Studio:
         previous=self.verify_accepted(self.plan['jobs'][job['index']-2]['job_id'])
         return context_clip(Path(previous['clip']),self.root/f"context-{ident}-r{record['revision']}.mp4",end_seconds=previous.get('tail_edit',{}).get('end_seconds'))
     def submit(self,ident):
+        require_no_quality_failure(self.root)
         job,record=self.job(ident);phase=record['phase']
+        if phase == 'video':
+            body = job['request_preview']['payload']
+            prompt = (body.get('prompt') or body.get('input', {}).get('prompt')
+                      or (body.get('content') or [{}])[0].get('text')
+                      or (body.get('instances') or [{}])[0].get('prompt'))
+            require_guarded_prompt(prompt)
         if record['state'] not in {'planned','lip_ready'}:raise ValueError('片段已提交或待验收；不能自动重新下单')
         self.current_approval();self.assets_unchanged()
         if job['index']>1:self.verify_accepted(self.plan['jobs'][0]['job_id'])
@@ -327,7 +338,8 @@ class Studio:
             checks=CHECKS + (AUDIO_CHECKS if record['state']=='review_pending' and job['kind']=='talking_head' else ())
         if self.plan.get('ad_contract'):checks=tuple(dict.fromkeys(checks+VIDEO_CHECKS))
         if sha256_file(video)!=sha:raise ValueError('视频已经改变')
-        folder=self.root/'reviews'/f'{ident}-{sha[:16]}';extract_review_frames(video,folder)
+        folder=self.root/'reviews'/f'{ident}-{sha[:16]}'
+        text_result = inspect_text(video, folder)
         script = ''.join(item['script'] for item in self.plan['jobs']) if final else job['script']
         audio_file=folder/'audio-qc.json'
         audio_report=read_json(audio_file) if audio_file.exists() else None
@@ -340,7 +352,7 @@ class Studio:
         template={'contract_digest':self.contract['digest'],'video_sha256':sha,'reviewer':None,'review_seconds':0,
                   'full_playback':False,'checks':{k:{'status':'pending','observations':''} for k in checks},
                   'audio_qc_file':str(audio_file), 'tail_action':'auto',
-                  'transcript':'','cues':[], 'text_review':{'manifest_file':str(manifest),'manifest_sha256':sha256_file(manifest),
+                  'transcript':'','cues':[], 'text_review':{**text_result,
                     'reviewer':None,'full_video_viewed':False,'all_sampled_frames_viewed':False,'last_frame_viewed':False,
                     'text_present':None,'observations':''}}
         if not final and job['index']>1:
@@ -368,6 +380,9 @@ class Studio:
         if self.plan.get('ad_contract'):checks=tuple(dict.fromkeys(checks+VIDEO_CHECKS))
         if evidence.get('contract_digest')!=self.contract['digest'] or evidence.get('video_sha256')!=sha or sha256_file(video)!=sha:
             raise ValueError('验收未绑定当前合同和当前视频')
+        if not (self.plan.get('ad_contract') or {}).get('source_text'):
+            record_confirmed_text_failure(self.root, video, evidence, self.contract['digest'])
+            require_no_quality_failure(self.root)
         if job and job['index']>1 and evidence.get('baseline_sha256')!=self.verify_accepted(self.plan['jobs'][0]['job_id'])['clip_sha256']:
             raise ValueError('验收未绑定当前首段的人物与声音基准')
         if evidence.get('reviewer') not in {'human_user','agent_audiovisual'} or evidence.get('full_playback') is not True:raise ValueError('需要实际完整播放及看听检查')
@@ -414,6 +429,9 @@ class Studio:
         if self.plan.get('review_mode') != 'continuous_candidate':raise ValueError('计划未确认连续候选制作；历史项目不能自动变更审核方式')
         job, record = self.job(ident)
         if record['state'] != 'review_pending':raise ValueError('当前片段没有待执行的继续制作检查')
+        if evidence.get('video_sha256') == record['clip_sha256'] and evidence.get('contract_digest') == self.contract['digest']:
+            record_confirmed_text_failure(self.root, Path(record['clip']), evidence, self.contract['digest'])
+        require_no_quality_failure(self.root)
         if any(event.get('job_id') == ident and event.get('video_sha256') == record['clip_sha256'] and event.get('declared_checks_passed') is False for event in self.state.get('review_events', [])):
             raise ValueError('同一原片已有明确失败的实际验收，不能改成主观待检继续')
         from production_review import validate
@@ -451,8 +469,18 @@ class Studio:
                     old['state']='review_pending';old.pop('review',None);old.pop('review_digest',None)
         if self.state['final']:
             self.state.setdefault('final_history',[]).append(self.state['final']);self.state['final']=None
-        self.state['status']='authorized';self.save();return {'status':'revision_planned','invalidated':downstream}
+        self.state['status']='authorized';self.save()
+        # Only this explicit, separately authorized revision retires its failure
+        # pointer; immutable evidence and the previous job remain in history.
+        for name in ('quality-failure.json', 'quality-failure-report.json'):
+            failure = self.root / name
+            if failure.is_file() and read_json(failure).get('video_sha256') == evidence['video_sha256']:
+                archive = self.root / 'quality-failures' / (sha256_file(failure) + '.json')
+                if not archive.exists():atomic_write_json(archive, read_json(failure))
+                failure.unlink()
+        return {'status':'revision_planned','invalidated':downstream}
     def assemble(self):
+        require_no_quality_failure(self.root)
         self.assets_unchanged();clips=[];edits=[]
         for job in self.plan['jobs']:
             record=self.verify_accepted(job['job_id']);clips.append(Path(record['clip']))
@@ -492,12 +520,14 @@ class Studio:
                 'review_seconds':sum(x.get('review_seconds',0) for x in reviews),'pilot_first_review_checks_passed':pilot[0]['declared_checks_passed'] if pilot else None,'test_mode':self.loopback,
                 'real_media_quality_verified':False if self.loopback else self.state['status']=='delivered'}
     def deliver(self):
+        require_no_quality_failure(self.root)
         final=self.state.get('final')
         self.assets_unchanged()
         if self.state['status']!='delivered' or not final or not final.get('business_accepted'):raise ValueError('全片技术检查与实际看听、商业验收尚未全部通过')
         if digest_json(final['review'])!=final.get('review_digest'):raise ValueError('最终验收记录已经变化')
         for job in self.plan['jobs']:self.verify_accepted(job['job_id'])
         if sha256_file(Path(final['video']))!=final['video_sha256'] or sha256_file(Path(final['subtitles']))!=final['subtitles_sha256']:raise ValueError('交付文件已经变化')
+        validate_text_review(final['review'], Path(final['video']), {'video_prompt_spec': {'ad_contract': self.plan.get('ad_contract')}, 'settings': {'purpose': self.plan['purpose']}})
         files=[{'path':final['video'],'sha256':final['video_sha256']},{'path':final['subtitles'],'sha256':final['subtitles_sha256']}]
         if final.get('lossless_audio_video'):
             for path in [Path(final['lossless_audio_video']),Path(final['video']).parent/'master.wav']:
@@ -510,6 +540,7 @@ class Studio:
 
     def advance(self,review_dir=None):
         """Advance existing authorization to the next genuine external/review boundary."""
+        require_no_quality_failure(self.root)
         review_dir=Path(review_dir).resolve() if review_dir else self.root/'completed-reviews'
         for _ in range(len(self.plan['jobs'])*8+8):
             pending=next((j for j in self.plan['jobs'] if self.state['jobs'][j['job_id']]['state'] not in {'accepted','production_checked'}),None)

@@ -38,6 +38,9 @@ def safe_url(url, *, loopback=False):
 def request(method, url, *, headers=None, payload=None, raw=None, limit=4*1024*1024, loopback=False, diagnostic=None):
     safe_url(url, loopback=loopback)
     headers = dict(headers or {})
+    if urllib.parse.urlsplit(url).hostname == 'router.91topgo.com':
+        from provider import PROVIDER_HEADERS
+        headers = {**PROVIDER_HEADERS, **headers}
     body = raw
     if payload is not None:
         body = json.dumps(payload, ensure_ascii=False).encode()
@@ -217,6 +220,9 @@ class Adapter:
             if self.loopback and parsed.hostname not in {'localhost','127.0.0.1'}:
                 raise ValueError('测试模式不能下载外部媒体')
             headers=self.headers if parsed.netloc==origin else {}
+            if parsed.hostname in {'router.91topgo.com', 'cdn.91topgo.com'}:
+                from provider import PROVIDER_HEADERS
+                headers = {**PROVIDER_HEADERS, **headers}
             req=urllib.request.Request(url,headers=headers)
             try:
                 response=urllib.request.build_opener(NoRedirect()).open(req,timeout=90)

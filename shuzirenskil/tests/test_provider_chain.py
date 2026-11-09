@@ -42,8 +42,14 @@ class UnauthorizedProbeHandler(BaseHTTPRequestHandler):
 
 
 class ProviderChainTests(unittest.TestCase):
-    def test_primary_chain_is_91topgo_and_fallback_is_mikuapi(self) -> None:
-        chain = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json")
+    def test_default_provider_is_apiaw(self) -> None:
+        import json
+        path = SKILL_DIR / 'assets' / 'provider-chain.json'
+        self.assertEqual(_load_video_config(path)['provider_id'], 'apiaw')
+        self.assertEqual(json.loads(path.read_text())['fallback_providers'], ['91topgo'])
+
+    def test_91topgo_and_legacy_mikuapi_protocols(self) -> None:
+        chain = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json", "91topgo")
         self.assertEqual(chain["provider_id"], "91topgo")
         self.assertEqual(chain["create_path"], "/v1/videos")
         self.assertEqual(chain["duration_field"], "seconds")
@@ -56,7 +62,7 @@ class ProviderChainTests(unittest.TestCase):
         self.assertEqual(fallback["create_path"], "/v1/videos/generations")
 
     def test_91topgo_validation_rejects_image_to_video_mode(self) -> None:
-        config = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json")
+        config = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json", "91topgo")
         _validate_config(config)
         config["supports_image_to_video"] = True
         with self.assertRaises(ValueError):
@@ -83,7 +89,7 @@ class ProviderChainTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            config = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json")
+            config = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json", "91topgo")
             config["base_url"] = f"http://127.0.0.1:{server.server_port}"
             with self.assertRaisesRegex(ValueError, "检查失败"):
                 _verify_pre_submit_auth(config, "invalid-test-key", 3)
@@ -115,7 +121,7 @@ class ProviderChainTests(unittest.TestCase):
             digest = hashlib.sha256(image.read_bytes()).hexdigest()
             payload = _provider_reference_payload(
                 {"local_path": str(image), "sha256": digest},
-                _load_video_config(SKILL_DIR / "assets" / "provider-chain.json"),
+                _load_video_config(SKILL_DIR / "assets" / "provider-chain.json", "91topgo"),
             )
             self.assertTrue(payload["url"].startswith("data:image/jpeg;base64,"))
 
@@ -124,7 +130,7 @@ class ProviderChainTests(unittest.TestCase):
             env_file = Path(temp_dir) / ".env"
             env_file.write_text("SHUZIRENSKIL_API_KEY=legacy-invalid\n", encoding="utf-8")
             env_file.chmod(0o600)
-            config = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json")
+            config = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json", "91topgo")
             # Historical snapshots still contain this unsafe alias.
             config["api_key_env_aliases"] = ["SHUZIRENSKIL_API_KEY"]
             args = argparse.Namespace(env_file=env_file, project_dir=Path(temp_dir))
@@ -136,7 +142,7 @@ class ProviderChainTests(unittest.TestCase):
             env_file = Path(temp_dir) / ".env"
             env_file.write_text("SHUZIRENSKIL_91TOPGO_API_KEY=explicit-valid\n", encoding="utf-8")
             env_file.chmod(0o600)
-            config = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json")
+            config = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json", "91topgo")
             args = argparse.Namespace(env_file=env_file, project_dir=Path(temp_dir))
             with patch("private_env._keychain_value", return_value="keychain-valid"):
                 self.assertEqual(_api_key(config, args), "explicit-valid")

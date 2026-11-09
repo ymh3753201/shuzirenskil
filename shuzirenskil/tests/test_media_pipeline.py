@@ -118,9 +118,10 @@ class MediaPipelineTests(unittest.TestCase):
             "--critical-facts", "pass",
         ]
         if kind == "clean":
-            inspection = json.loads(self.run_cli(project, "inspect-visuals", "--video", str(project / "outputs" / "final.clean.mp4"), "--output-dir", str(project / "review-frames" / kind)).stdout)
+            from text_fixture import synthetic_text_inspection, viewed_indices
+            inspection = synthetic_text_inspection(project / 'outputs/final.clean.mp4', project / 'review-frames' / kind)
             # Synthetic media and simulated observations verify the review contract, not actual human perception.
-            evidence["text_review"] = {"manifest_file": inspection["manifest_file"], "manifest_sha256": inspection["manifest_sha256"], "reviewer": "agent_visual", "full_video_viewed": True, "all_sampled_frames_viewed": True, "last_frame_viewed": True, "text_present": False, "observations": "测试夹具为纯色合成视频，模拟已完整查看的证据。"}
+            evidence["text_review"] = {**inspection, "reviewed_frame_indices": viewed_indices(inspection), "reviewer": "agent_visual", "full_video_viewed": True, "all_sampled_frames_viewed": True, "last_frame_viewed": True, "text_present": False, "observations": "测试夹具为纯色合成视频，模拟已完整查看的证据。"}
             evidence["no_generated_text"] = "已检查抽帧，画面中没有字幕、标题、Logo 或水印"
             args += ["--no-generated-text", "pass"]
         else:

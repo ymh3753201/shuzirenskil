@@ -17,6 +17,7 @@ from capability_planner import plan_narration
 from media import probe
 from model_registry import load_registry, get_profile, resolve_voice
 from request_preview import compile_preview
+from text_policy import guard_prompt, audio_only_dialogue, validate_direction, require_text_free_ad
 
 SPEC_FIELDS = {"schema_version", "name", "model_profile", "voice", "voice_design", "script", "assets",
                "reference_images", "character_bible", "resolution", "aspect_ratio", "duration_mode",
@@ -105,6 +106,11 @@ def build_plan(spec: dict, base: Path) -> dict:
         ad_prompt = render_ad_prompt(ad, mode, roles, 1)
     elif ad is not None:
         raise ValueError("广告合同必须声明对应 purpose")
+    require_text_free_ad(ad)
+    if ad:
+        validate_direction({k: ad[k] for k in ('scene', 'spatial_relationship', 'action', 'identity_locks')}, 'ad_contract')
+    validate_direction(bible, 'character_bible')
+    validate_direction(design, 'voice_design')
 
     shots = spec.get("shots")
     audio_plan = None
@@ -213,20 +219,19 @@ def build_plan(spec: dict, base: Path) -> dict:
     jobs = []
     cursor = 0
     for index, segment in enumerate(segments, 1):
+        validate_direction(segment['visual_brief'], 'visual_brief')
         is_talking = segment["kind"] == "talking_head"
         prompt = "；".join(f"{k}: {v}" for k, v in bible.items()) + "。\n" + segment["visual_brief"]
         prompt += "。生成真实连续动态画面，禁止照片拼贴或静态照片推拉。\n" + ad_prompt
-        if not ad or not ad["source_text"]:
-            from video_prompt import NO_TEXT_RULE
-            prompt += "\n无文字画面合同：" + NO_TEXT_RULE
         audio_token = None
         if is_talking and voice["mode"] != "locked_audio":
-            prompt += f"\n逐字口播：{segment['script']}\n角色声音设计：{design}"
+            prompt += '\n' + audio_only_dialogue(segment['script']) + f"\n角色声音设计：{design}"
             if voice["send_audio_to_video_model"]:
                 audio_token = "asset://" + bound[voice["selected_audio_asset"]]["sha256"]
                 prompt += "\n音色参考音频1；只参考音色，台词以本段口播稿为准。"
         else:
             prompt += "\n人物不说话，保持自然动作；不生成人声旁白。"
+        prompt = guard_prompt(prompt)
         preview = compile_preview(profile, prompt=prompt, seconds=segment["request_seconds"], resolution=resolution,
                                   ratio=ratio, images=["asset://" + bound[k]["sha256"] for k in refs], audio=audio_token)
         use_seconds = segment.get("use_seconds", segment["request_seconds"])

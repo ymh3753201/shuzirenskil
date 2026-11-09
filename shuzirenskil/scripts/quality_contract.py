@@ -75,6 +75,9 @@ def validate_text_review(evidence: dict[str, Any], video: Path, project: dict | 
             raise ValueError("原生文字须与当前白名单逐字复核，且没有新增文字；不可伪填全画面无字")
     elif review.get("text_present") is not False:
         raise ValueError("已发现文字；无文字项不能通过")
+    else:
+        from text_inspection import validate_ocr
+        validate_ocr(review, video, manifest)
     if any(review.get(key) is not True for key in ("full_video_viewed", "all_sampled_frames_viewed", "last_frame_viewed")):
         raise ValueError("全片、取样、末帧未全部看完，或已发现文字；无文字项不能通过")
     if not isinstance(review.get("observations"), str) or len(review["observations"].strip()) < 8:

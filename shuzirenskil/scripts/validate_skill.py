@@ -11,6 +11,8 @@ configure()
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REQUIRED = [
+    "scripts/text_policy.py", "scripts/text_inspection.py", "scripts/generation_gates.py",
+    "references/text-free-generation.md", "tests/test_no_text_regression.py",
     "VERSION", "scripts/console_utf8.py",
     "scripts/text_worker.py", "scripts/production_review.py", "references/continuous-production.md",
     "scripts/runtime_tools.py", "scripts/setup_environment.py", "scripts/run.py",
@@ -85,10 +87,10 @@ def main() -> int:
                 errors.append(f"疑似鉴权内容: {path.relative_to(SKILL_DIR)}")
     try:
         chain = json.loads((SKILL_DIR / "assets/provider-chain.json").read_text(encoding="utf-8"))
-        if chain.get("primary_provider") != "91topgo":
-            errors.append("首选视频 Provider 必须是 91topgo")
-        if "mikuapi" not in chain.get("fallback_providers", []):
-            errors.append("Provider 链必须保留 mikuapi 降级")
+        if chain.get("primary_provider") != "apiaw":
+            errors.append("首选视频 Provider 必须是 APIAW")
+        if chain.get("fallback_providers") != ["91topgo"]:
+            errors.append("自动备用必须仅包含 91topgo；MikuAPI 仅供显式选择")
         primary = chain.get("providers", {}).get("91topgo", {})
         if primary.get("base_url") != "https://router.91topgo.com" or primary.get("create_path") != "/v1/videos":
             errors.append("91topgo 地址或创建路径不符合文档")

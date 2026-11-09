@@ -1,7 +1,9 @@
 {
   "schema_version": "1.0",
-  "primary_provider": "91topgo",
-  "fallback_providers": ["mikuapi"],
+  "primary_provider": "apiaw",
+  "fallback_providers": [
+    "91topgo"
+  ],
   "providers": {
     "91topgo": {
       "schema_version": "3.0",
@@ -14,10 +16,22 @@
       "model": "grok-imagine-video-1.5",
       "canonical_model": "grok-imagine-video-1.5",
       "provider_request_model": "grok-imagine-video-1.5",
-      "official_model_aliases": ["grok-imagine-video-1.5-preview"],
+      "official_model_aliases": [
+        "grok-imagine-video-1.5-preview"
+      ],
       "default_generation_mode": "reference-to-video",
-      "documented_generation_modes": ["text-to-video", "reference-to-video"],
-      "documented_payload_fields": ["model", "prompt", "seconds", "reference_images", "aspect_ratio", "resolution"],
+      "documented_generation_modes": [
+        "text-to-video",
+        "reference-to-video"
+      ],
+      "documented_payload_fields": [
+        "model",
+        "prompt",
+        "seconds",
+        "reference_images",
+        "aspect_ratio",
+        "resolution"
+      ],
       "input_mode": "reference-to-video",
       "supports_text_to_video": true,
       "supports_reference_images": true,
@@ -29,13 +43,34 @@
       "supports_aspect_ratio": true,
       "supports_resolution": true,
       "default_resolution": "720p",
-      "supported_aspect_ratios": ["9:16", "16:9"],
-      "supported_resolutions": ["720p"],
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9"
+      ],
+      "supported_resolutions": [
+        "720p"
+      ],
       "duration_field": "seconds",
       "duration_payload_type": "string",
       "min_duration_seconds": 1,
       "max_duration_seconds": 15,
-      "allowed_duration_seconds": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+      "allowed_duration_seconds": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
       "supports_image_to_video": false,
       "image_input_verified": true,
       "reference_images_verified": true,
@@ -60,12 +95,111 @@
       "runtime_paid_verified_at": "2026-09-24",
       "runtime_paid_attempt_count": 1,
       "health_probe_path": "/v1/videos/__shuzirenskil_healthcheck__",
-      "health_probe_expected_statuses": [200, 400, 404, 405],
-      "fallback_provider": "mikuapi",
+      "health_probe_expected_statuses": [
+        200,
+        400,
+        404,
+        405
+      ],
+      "fallback_provider": null,
       "notes": "已用一次 1 秒纯文本请求完成创建、异步查询和下载验证；同时复用带货视频 Skill 的 91topgo reference_images 实测合同。当前本地参考图优先压缩为不超过 800000 字节的 JPEG Data URI，直接放入 reference_images，不调用图片上传接口。禁止发送 reference_audios 或音频文件。"
     },
     "mikuapi": {
       "config_path": "model-config.json"
+    },
+    "apiaw": {
+      "schema_version": "3.0",
+      "provider_id": "apiaw",
+      "provider": "apiaw",
+      "base_url": "https://newapi.apiaw.com",
+      "create_path": "/v1/videos",
+      "status_path_template": "/v1/videos/{task_id}",
+      "content_path_template": "/v1/videos/{task_id}/content",
+      "model": "grok-imagine-video-1.5",
+      "canonical_model": "grok-imagine-video-1.5",
+      "provider_request_model": "grok-imagine-video-1.5",
+      "official_model_aliases": [
+        "grok-imagine-video-1.5-preview"
+      ],
+      "default_generation_mode": "reference-to-video",
+      "documented_generation_modes": [
+        "text-to-video",
+        "reference-to-video"
+      ],
+      "documented_payload_fields": [
+        "model",
+        "prompt",
+        "seconds",
+        "image",
+        "aspect_ratio",
+        "resolution"
+      ],
+      "input_mode": "reference-to-video",
+      "supports_text_to_video": true,
+      "supports_reference_images": true,
+      "reference_field": "image",
+      "reference_payload_format": "data_uri",
+      "supports_multiple_references": true,
+      "max_reference_images": 1,
+      "reference_image_prompt_index_base": 0,
+      "supports_aspect_ratio": true,
+      "supports_resolution": true,
+      "default_resolution": "720p",
+      "supported_aspect_ratios": [
+        "9:16",
+        "16:9"
+      ],
+      "supported_resolutions": [
+        "720p"
+      ],
+      "duration_field": "seconds",
+      "duration_payload_type": "string",
+      "min_duration_seconds": 1,
+      "max_duration_seconds": 15,
+      "allowed_duration_seconds": [
+        5,
+        10,
+        15
+      ],
+      "supports_image_to_video": true,
+      "image_input_verified": true,
+      "reference_images_verified": true,
+      "reference_images_verified_scope": "91topgo_generated_reference_smoke_from_ai_commerce_video_skill",
+      "requires_public_https_images": false,
+      "local_image_transport": "jpeg_data_uri",
+      "jpeg_quality": 6,
+      "max_inline_image_bytes": 800000,
+      "supports_audio": true,
+      "supports_native_speech_output": true,
+      "reference_audio_field": null,
+      "supports_audio_file_upload": false,
+      "requires_image": false,
+      "api_key_env": "SHUZIRENSKIL_APIAW_API_KEY",
+      "api_key_env_aliases": [],
+      "api_key_keychain_service": null,
+      "prefer_keychain": false,
+      "automatic_retry_allowed": false,
+      "runtime_paid_verified": false,
+      "verification_level": "provider_documented_pending_live_validation",
+      "runtime_paid_verified_scope": "91topgo_1s_text_to_video_success_and_reference_images_cross_skill_verified",
+      "runtime_paid_verified_at": "2026-09-24",
+      "runtime_paid_attempt_count": 1,
+      "health_probe_path": "/v1/videos/__shuzirenskil_healthcheck__",
+      "health_probe_expected_statuses": [
+        200,
+        400,
+        404,
+        405
+      ],
+      "fallback_provider": "91topgo",
+      "notes": "APIAW 专用协议：单张 image Data URI、整数 seconds。文档 https://web.apiaw.com/docs#grok-video，2026-11-04；仅明确失败后降级，不重复未知提交。 实际2026-11-04校验：数字seconds被invalid_json拒绝，必须字符串。",
+      "gateway_reference_to_video_enabled": true
     }
+  },
+  "automatic_fallback": {
+    "enabled": true,
+    "max_providers_per_segment": 2,
+    "on_ambiguous_submission": "stop",
+    "authorization": "用户2026-11-04明确要求今后失败自动切换备用渠道，每渠道最多一次"
   }
 }

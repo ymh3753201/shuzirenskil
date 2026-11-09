@@ -77,6 +77,7 @@ class ReleaseGateTests(unittest.TestCase):
         with patch.object(workflow, 'load_project', return_value=self.project), \
              patch.object(workflow, 'read_json', return_value=jobs), \
              patch.object(workflow, 'stitch', return_value={'output': {'duration_seconds': 41.917}}), \
+             patch.object(workflow, 'require_original_dimensions'), \
              patch('builtins.print'):
             workflow.command_stitch(self.args)
         report = json.loads((self.root/'stitch-report.json').read_text(encoding="utf-8"))

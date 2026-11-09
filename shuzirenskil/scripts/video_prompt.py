@@ -6,12 +6,12 @@ import json
 import re
 from typing import Any
 from ad_contract import validate_ad_contract, render_ad_prompt
+from text_policy import NO_TEXT_RULE, guard_prompt, audio_only_dialogue, validate_direction, require_text_free_ad
 
 
 PROMPT_SPEC_VERSION = "3.0"
 CASTING_FIELDS = ("character_key", "role", "visual_basis", "rationale", "resonance", "texture", "articulation", "avoid")
 CASTING_SOUND_FIELDS = ("resonance", "texture", "articulation", "avoid")
-NO_TEXT_RULE = "采用纯摄影画面，仅人物、实景与自然动作。画面从第一帧到最后一帧均不出现任何文字、字幕、标题、金句、片尾卡、Logo、水印或 UI；台词和表演触发词仅用于声音与动作，不得转为屏幕文字。人物说到数字、列表、重点词或举手计数时，只用口述与手势表达，不出现对应字符或动态图文。末句说完继续保持同一人物和场景，自然收声，不生成总结字卡。"
 MAX_PROMPT_CHARS = 4096
 VOICE_PROFILE_FIELDS = (
     "gender",
@@ -234,6 +234,13 @@ def build_video_prompt(
     reference_image_index_base: int = 1,
 ) -> str:
     spec = validate_prompt_spec(prompt_spec)
+    require_text_free_ad(spec.get('ad_contract'))
+    if spec.get('ad_contract'):
+        validate_direction({k: spec['ad_contract'][k] for k in ('scene', 'spatial_relationship', 'action', 'identity_locks')}, 'ad_contract')
+    validate_direction({k: v for k, v in spec.items() if k not in {'performance_beats', 'ad_contract'}}, 'prompt_spec')
+    validate_direction(continuity, 'continuity')
+    for beat in spec['performance_beats']:
+        validate_direction({k: v for k, v in beat.items() if k != 'trigger_phrase'}, 'performance_beats')
     parts: list[str] = []
     roles = reference_roles or []
     voices = preset_voices or []
@@ -291,13 +298,13 @@ def build_video_prompt(
         f"视觉质感：{spec['visual_style'].rstrip('。')}。",
         f"镜头设计：{spec['shot'].rstrip('。')}。",
         f"人物表演：{spec['performance'].rstrip('。')}。",
-        f"台词：同一位主体用{language}完整说出“{segment['script']}”。{spec['speech_delivery'].rstrip('。')}。",
+        audio_only_dialogue(segment['script'], language) + '\n' + spec['speech_delivery'].rstrip('。') + '。',
         f"声音设计：{spec['ambience']}；{spec['music']}。人声与嘴部动作同步，环境声不能盖住台词。",
         "时间与动作：从自然呼吸和目光交流开始；手势只在对应语义出现时轻微发生，随后自然放回，避免全程固定微笑、持续点头或重复动作；句尾自然收声，不在一句话中途切镜。",
     ])
     if beats:
-        parts.append("本段表演节拍：" + "；".join(
-            f"说到‘{beat['trigger_phrase']}’时，表情{beat['expression']}" + (f"，手势{beat['gesture']}" if beat.get("gesture") else "")
+        parts.append("本段表演节拍（按声音原文的字符位置定位，仅供动作同步，不显示位置编号）：" + "；".join(
+            f"声音原文第{segment['script'].index(beat['trigger_phrase']) + 1}至{segment['script'].index(beat['trigger_phrase']) + len(beat['trigger_phrase'])}个字符说出时，表情{beat['expression']}" + (f"，手势{beat['gesture']}" if beat.get("gesture") else "")
             for beat in beats
         ) + "。")
     if "unspoken_budget_seconds" in segment:
@@ -306,16 +313,8 @@ def build_video_prompt(
     negatives = spec["negative_constraints"]
     if ad:
         parts.append(render_ad_prompt(ad, generation_mode, roles, reference_image_index_base))
-        if ad["source_text"]:
-            # Only replace the exact legacy default; reject other blanket bans instead of silently rewriting intent.
-            old = default_prompt_spec()["negative_constraints"][1]
-            negatives = ["不得添加参考图白名单之外的文字或标识" if x == old else x for x in negatives]
-            if any(re.search(r"(?:禁止|不得|不出现|没有|无).{0,8}(?:任何文字|所有文字|文字、|文字，|Logo)", x) for x in negatives):
-                raise ValueError("广告允许原生招牌时，negative_constraints 不能同时全面禁止文字或 Logo")
     parts.append("强制限制：" + "；".join(negatives) + "。")
-    if spec["schema_version"] in {"3.0", "3.1"} and not (ad and ad["source_text"]):
-        parts.append("无文字画面合同：" + NO_TEXT_RULE)
-    prompt = "\n".join(parts)
+    prompt = guard_prompt("\n".join(parts))
     if len(prompt) > MAX_PROMPT_CHARS:
         raise ValueError(f"视频提示词超过 {MAX_PROMPT_CHARS} 字符，请精简方案")
     return prompt

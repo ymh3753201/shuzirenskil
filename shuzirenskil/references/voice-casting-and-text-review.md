@@ -1,5 +1,8 @@
 # 角色配音与文字策略：普通口播 3.0 / 广告 3.1
 
+> 2026-11-06 更新：所有新生成画面全程无字，普通口播与广告一致。本文旧原生文字白名单仅供历史记录追溯，不能据此创建新请求；详见 [全程无字生成规则](text-free-generation.md)。
+
+
 2026-10-18：首段所有观察项（包括 voice_casting_match、no_generated_text）必须使用包含 `status` 和 `observations` 的对象；旧纯文字不再视为通过。新模板为 `assets/pilot-review-template.json`。多模型的自由配音、参考音色与严格音轨规划见 `multimodel-production.md`，本文件其余内容描述现有 Grok 执行流程。
 
 ## 1. 先做配音选角，再锁定声音

@@ -141,6 +141,8 @@ class GuardedApiTests(unittest.TestCase):
         if api_key:
             env["SHUZIRENSKIL_MIKUAPI_API_KEY"] = "test-only-not-a-real-key"
         command = ["python3", str(WORKFLOW), "--project-dir", str(project)]
+        if getattr(self, 'provider_override', None):
+            command += ['--provider', self.provider_override]
         if env_file:
             command += ["--env-file", str(env_file)]
         cli_args = list(args)
@@ -226,6 +228,8 @@ class GuardedApiTests(unittest.TestCase):
         self.assertEqual(FakeHandler.post_count, 0)
 
     def test_91topgo_primary_accepts_confirmed_local_image_without_https(self) -> None:
+        # APIAW is now the default; this regression explicitly covers 91topgo.
+        self.provider_override = '91topgo'
         project = self.root / "91topgo-local-reference"
         short_script = self.root / "short-script.txt"
         short_script.write_text("Codex能帮你整理资料、检查信息，并把重复工作变成清晰流程。", encoding="utf-8")
@@ -361,8 +365,9 @@ class GuardedApiTests(unittest.TestCase):
         missing_text = self.run_cli(project, "review-pilot", "--evidence-file", str(evidence), expect=1)
         self.assertIn("text_review", missing_text.stderr)
         self.assertEqual(FakeHandler.post_count, 1)
-        inspection = json.loads(self.run_cli(project, "inspect-visuals", "--video", str(pilot_clip), "--output-dir", str(project / "pilot-visuals")).stdout)
-        evidence_data["text_review"] = {"manifest_file": inspection["manifest_file"], "manifest_sha256": inspection["manifest_sha256"], "reviewer": "agent_visual", "full_video_viewed": True, "all_sampled_frames_viewed": True, "last_frame_viewed": True, "text_present": False, "observations": "纯色合成测试视频，模拟检查首尾及全程画面。"}
+        from text_fixture import synthetic_text_inspection, viewed_indices
+        inspection = synthetic_text_inspection(pilot_clip, project / 'pilot-visuals')
+        evidence_data["text_review"] = {**inspection, "reviewed_frame_indices": viewed_indices(inspection), "reviewer": "agent_visual", "full_video_viewed": True, "all_sampled_frames_viewed": True, "last_frame_viewed": True, "text_present": False, "observations": "纯色合成测试视频，模拟检查首尾及全程画面。"}
         original_lip_check = evidence_data["lip_sync"]
         for rejected in ("FAIL：本项明确未通过，必须停止后续付费生成。", {"status": "fail", "observations": "口型与音频不同步，不能继续生成。"}, {"status": "pending", "observations": "尚未检查完毕，不能继续生成。"}):
             evidence_data["lip_sync"] = rejected

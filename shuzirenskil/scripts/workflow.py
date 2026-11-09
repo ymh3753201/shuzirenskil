@@ -50,6 +50,8 @@ from planner import ends_complete_sentence, plan_segments, require_ready_timing,
 from private_env import load_private_value  # noqa: E402
 from ad_contract import AD_KINDS, validate_ad_review
 from quality_contract import validate_character_review, validate_text_review, validate_pilot_checks  # noqa: E402
+from generation_gates import require_no_quality_failure, require_original_dimensions, record_confirmed_text_failure
+from text_policy import require_guarded_prompt, require_text_free_ad
 from provider import ProviderError, create_task, download_content, download_video_url, extract_video_url, get_status, list_model_ids, probe_endpoint, upload_file  # noqa: E402
 from video_prompt import (  # noqa: E402
     build_video_prompt,
@@ -139,6 +141,40 @@ def _verify_plan_digest(project: dict[str, Any]) -> None:
         raise ValueError("脚本、时长、分段、设置或输入记录已经变化，必须重新建立方案并确认")
 
 
+def _align_provider_durations(plan: dict[str, Any], choices: list[int]) -> None:
+    """Round requests up to supported slots while preserving text and speech rate."""
+    if not choices or any(type(value) is not int or not 1 <= value <= 15 for value in choices):
+        raise ValueError("服务商时长档位无效")
+    choices = sorted(set(choices))
+    rounded = []
+    for segment in plan["segments"]:
+        seconds = next((value for value in choices if value >= segment["request_seconds"]), None)
+        if seconds is None:
+            raise ValueError("当前台词无法装入服务商支持的时长档位")
+        rounded.append(seconds)
+    total = sum(rounded)
+    constraint = plan.get("duration_constraint_seconds")
+    mode = plan.get("duration_mode")
+    if mode != "reference" and constraint is not None and total > constraint:
+        raise ValueError("服务商时长取整后超过已确认的时长限制")
+    if mode == "exact" and total != constraint:
+        raise ValueError("服务商时长档位无法满足精确时长")
+    for segment, seconds in zip(plan["segments"], rounded):
+        segment.update(request_seconds=seconds,
+                       unspoken_budget_seconds=round(seconds - segment["estimated_speech_seconds"], 2),
+                       unspoken_budget_limit_seconds=round(max(1.5, seconds * 0.15), 2))
+    plan.update(provider_duration_choices=choices, planned_request_total_seconds=total,
+                provider_request_total_seconds=total,
+                speech_fill_ratio=round(plan["estimated_speech_seconds"] / total, 4),
+                duration_request_policy="content_rounded_up_to_provider_slot")
+    if mode == "reference" or constraint is None:
+        plan.update(target_delivery_seconds=total, delivery_max_seconds=total)
+    alternative = plan["content_fit_alternative"]
+    alternative["request_seconds"] = [next(value for value in choices if value >= seconds)
+                                       for seconds in alternative["request_seconds"]]
+    alternative["total_seconds"] = sum(alternative["request_seconds"])
+
+
 def _verify_minimal_segment_plan(project: dict[str, Any]) -> None:
     """防止对话层把每个完整句子错误地变成一个付费片段。"""
     if project.get("route") != "video_generation":
@@ -151,6 +187,8 @@ def _verify_minimal_segment_plan(project: dict[str, Any]) -> None:
         speech_rate_cpm=int(plan.get("speech_rate_cpm", 306)),
         planner_version=str(plan.get("planner_version", "1.0")),
     )
+    if plan.get("provider_duration_choices"):
+        _align_provider_durations(expected, plan["provider_duration_choices"])
     if plan.get("planner_version") == "2.0" and not plan.get("duration_capability_test"):
         require_ready_timing(expected)
     if plan.get("duration_capability_test") is True:
@@ -234,9 +272,13 @@ def command_prepare(args: argparse.Namespace) -> None:
         raise ValueError("预设声音 reference_audios 只能用于 reference-to-video 模式")
 
     if route == "video_generation":
+        require_text_free_ad(ad)
         if args.duration_capability_test and args.duration is None:
             raise ValueError("时长能力测试必须显式提供 --duration")
         plan = plan_segments(script, args.duration, duration_mode=args.duration_mode, speech_rate_cpm=prompt_spec["speech_rate_cpm"])
+        config = _load_video_config(None, getattr(args, "provider", None))
+        if config.get("provider_id") == "apiaw":
+            _align_provider_durations(plan, config["allowed_duration_seconds"])
         if not args.duration_capability_test:
             require_ready_timing(plan)
         if not args.allow_legacy_performance_plan:
@@ -855,6 +897,15 @@ def command_authorize(args: argparse.Namespace) -> None:
         "long_video_risk_acknowledged": bool(args.acknowledge_long_video_risk),
         "character_review_digest": digest_json(project.get("character_review", {})),
     }
+    chain = read_json(default_config_path())
+    if chain.get('automatic_fallback', {}).get('enabled'):
+        project['production_authorization']['fallback_policy'] = {
+            'max_providers_per_segment': 2,
+            'providers': [_load_video_config(default_config_path(), name)
+                          for name in chain.get('fallback_providers', [])],
+            'on_ambiguous_submission': 'stop',
+        }
+        project['production_authorization']['fallback_policy_digest'] = digest_json(project['production_authorization']['fallback_policy'])
     project["state"].update({
         "stage": "production_authorized",
         "image_assets_confirmed": True,
@@ -866,6 +917,10 @@ def command_authorize(args: argparse.Namespace) -> None:
 
 def _validate_config(config: dict[str, Any]) -> None:
     provider_id = str(config.get("provider_id") or config.get("provider") or "mikuapi")
+    if provider_id == "apiaw":
+        from fallback import validate_apiaw
+        validate_apiaw(config)
+        return
     if provider_id == "91topgo":
         if config.get("provider") != "91topgo":
             raise ValueError("91topgo 配置的 provider 必须为 91topgo")
@@ -1007,7 +1062,7 @@ def command_preflight(args: argparse.Namespace) -> None:
         provider_inputs = _load_private_provider_inputs(
             args.project_dir,
             project.get("provider_input_digest", ""),
-            allow_local=provider_id == "91topgo" and config.get("local_image_transport") in {"jpeg_data_uri", "jpg_data_uri"},
+            allow_local=provider_id in {"91topgo", "apiaw"} and config.get("local_image_transport") in {"jpeg_data_uri", "jpg_data_uri"},
         )
         authorization = project.get("production_authorization", {})
         if project["settings"].get("character_review_required"):
@@ -1132,6 +1187,10 @@ def command_preflight(args: argparse.Namespace) -> None:
             "custom_audio_file_reference": False,
         },
     }
+    fallback_policy = project.get('production_authorization', {}).get('fallback_policy', {})
+    if fallback_policy.get('providers'):
+        contract_core['fallback_policy'] = fallback_policy
+        contract_core['max_paid_submissions_including_fallback'] = len(dry_requests) * 2
     ensure_no_secret_text(contract_core)
     contract = {**contract_core, "contract_digest": digest_json(contract_core), "created_at": now_iso()}
     existing_path = args.project_dir / "production-contract.json"
@@ -1373,6 +1432,7 @@ def command_check_provider(args: argparse.Namespace) -> None:
 
 
 def command_submit(args: argparse.Namespace) -> None:
+    require_no_quality_failure(args.project_dir)
     project = load_project(args.project_dir)
     if project["route"] != "video_generation" or project["state"]["stage"] not in {"preflight_passed", "production_started"}:
         raise ValueError("当前项目不能提交视频任务")
@@ -1399,16 +1459,16 @@ def command_submit(args: argparse.Namespace) -> None:
     _require_snapshot_provider(config, getattr(args, "provider", None))
     _verify_plan_digest(project)
     _verify_project_hashes(project)
-    api_key = _api_key(config, args)
-    _verify_pre_submit_auth(config, api_key, args.timeout)
     contract = read_json(args.project_dir / "production-contract.json")
+    if contract.get('fallback_policy') != project.get('production_authorization', {}).get('fallback_policy') and contract.get('fallback_policy'):
+        raise ValueError('备用服务商授权与生产合同不一致')
     jobs_path = args.project_dir / "jobs.json"
     jobs = read_json(jobs_path)
     provider_id = str(config.get("provider_id") or config.get("provider") or "mikuapi")
     provider_inputs = _load_private_provider_inputs(
         args.project_dir,
         project.get("provider_input_digest", ""),
-        allow_local=provider_id == "91topgo" and config.get("local_image_transport") in {"jpeg_data_uri", "jpg_data_uri"},
+        allow_local=provider_id in {"91topgo", "apiaw"} and config.get("local_image_transport") in {"jpeg_data_uri", "jpg_data_uri"},
     )
     if jobs["contract_digest"] != project["contract_digest"]:
         raise ValueError("任务账本与生产合同不一致")
@@ -1419,13 +1479,16 @@ def command_submit(args: argparse.Namespace) -> None:
             break
         if job["status"] in {"submitted", "polling", "downloaded", "verified"}:
             continue
-        if job["submission_attempts"] >= 1 or job["status"] in {"submitting", "submission_unknown", "failed"}:
+        from fallback import can_resume_rejected_fallback
+        resume_fallback = can_resume_rejected_fallback(job, project)
+        if not resume_fallback and (job["submission_attempts"] >= 1 or job["status"] in {"submitting", "submission_unknown", "failed"}):
             raise ValueError(f"{job['shot_id']} 已经尝试提交，禁止再次 POST")
         dry = read_json(dry_dir / f"{job['shot_id']}.json")
         image_path = Path(dry["asset_path"])
         if sha256_file(image_path) != dry["asset_sha256"]:
             raise ValueError(f"{job['shot_id']} 图片指纹变化")
         payload = dict(dry["payload"])
+        require_guarded_prompt(payload.get('prompt'))
         provider_input = provider_inputs.get(job["shot_id"])
         if not provider_input or digest_json(provider_input) != dry.get("provider_input_sha256"):
             raise ValueError(f"{job['shot_id']} 的 Provider 素材发生变化")
@@ -1441,26 +1504,18 @@ def command_submit(args: argparse.Namespace) -> None:
             payload["reference_images"] = [
                 _provider_reference_payload(ref, config) for ref in references
             ]
+        elif provider_id == "apiaw":
+            from fallback import apiaw_payload
+            payload = apiaw_payload(payload, provider_input, config)
         elif provider_input["mode"] == "image-to-video":
             payload["image"] = provider_input["image"]
         elif provider_input["mode"] == "reference-to-video":
             payload["reference_images"] = provider_input["reference_images"]
         else:
             raise ValueError(f"{job['shot_id']} 的生成模式错误")
-        job.update({"status": "submitting", "submission_attempts": 1, "attempted_at": now_iso()})
-        atomic_write_json(jobs_path, jobs)
-        try:
-            task_id = create_task(config["base_url"], config["create_path"], api_key, payload, args.timeout)
-        except ProviderError as exc:
-            job.update({
-                "status": "submission_unknown" if exc.ambiguous else "failed",
-                "error": str(exc),
-                "automatic_retry_allowed": False,
-            })
-            atomic_write_json(jobs_path, jobs)
-            raise
-        job.update({"status": "submitted", "task_id": task_id, "submitted_at": now_iso()})
-        atomic_write_json(jobs_path, jobs)
+        from fallback import submit_with_fallback
+        submit_with_fallback(job, jobs, jobs_path, None if resume_fallback else config, payload, project, args,
+                             _api_key, _verify_pre_submit_auth, _validate_config)
 
     project["state"]["stage"] = "production_started"
     save_project(args.project_dir, project)
@@ -1473,7 +1528,6 @@ def command_poll(args: argparse.Namespace) -> None:
         raise ValueError("现有视频后期项目不需要轮询")
     config = read_json(args.project_dir / "model-snapshot.json")
     _require_snapshot_provider(config, getattr(args, "provider", None))
-    api_key = _api_key(config, args)
     jobs_path = args.project_dir / "jobs.json"
     jobs = read_json(jobs_path)
     clips_dir = args.project_dir / "clips"
@@ -1493,6 +1547,9 @@ def command_poll(args: argparse.Namespace) -> None:
             if not job.get("task_id"):
                 raise ValueError(f"{job['shot_id']} 没有 task_id，禁止通过重新提交恢复")
             all_downloaded = False
+            config = job.get('provider_config') or read_json(args.project_dir / 'model-snapshot.json')
+            _validate_config(config)
+            api_key = _api_key(config, args)
             status_path = config["status_path_template"].format(task_id=job["task_id"])
             status, response = get_status(config["base_url"], status_path, api_key, args.timeout)
             job["last_status"] = status
@@ -1502,7 +1559,9 @@ def command_poll(args: argparse.Namespace) -> None:
             elif status in SUCCESS_STATUSES:
                 clip_path = clips_dir / f"{job['shot_id']}.mp4"
                 video_url = extract_video_url(response)
-                if video_url:
+                if config.get('provider_id') == 'apiaw' and video_url == config.get('content_path_template', '').format(task_id=job['task_id']):
+                    download_content(config['base_url'], video_url, api_key, clip_path, args.timeout)
+                elif video_url:
                     download_video_url(config["base_url"], video_url, clip_path, args.timeout)
                 elif config.get("content_path_template"):
                     content_path = config["content_path_template"].format(task_id=job["task_id"])
@@ -1513,7 +1572,12 @@ def command_poll(args: argparse.Namespace) -> None:
             elif status in FAILURE_STATUSES:
                 job.update({"status": "failed", "provider_status": status, "provider_error": response.get("error"), "automatic_retry_allowed": False})
                 atomic_write_json(jobs_path, jobs)
-                raise ProviderError(f"{job['shot_id']} Provider 终止状态: {status}")
+                from fallback import submit_with_fallback
+                dry = read_json(args.project_dir / 'requests' / 'dry-run' / f"{job['shot_id']}.json")
+                submit_with_fallback(job, jobs, jobs_path, config, dry['payload'], project, args,
+                                     _api_key, _verify_pre_submit_auth, _validate_config,
+                                     terminal_failure=True)
+
             else:
                 atomic_write_json(jobs_path, jobs)
                 raise ProviderError(f"未知 Provider 状态: {status}")
@@ -1537,6 +1601,7 @@ def command_poll(args: argparse.Namespace) -> None:
 
 
 def command_review_pilot(args: argparse.Namespace) -> None:
+    require_no_quality_failure(args.project_dir)
     project = load_project(args.project_dir)
     if project["route"] != "video_generation" or project["state"]["stage"] not in {"pilot_review_pending", "production_started"}:
         raise ValueError("当前项目没有待检查的首段试片")
@@ -1546,12 +1611,16 @@ def command_review_pilot(args: argparse.Namespace) -> None:
         raise ValueError("首段试片状态与后续未提交片段不符")
     clip = require_file(Path(first["clip_path"]), "首段试片")
     summary = technical_summary(clip)
+    require_original_dimensions(clip, project['settings'])
     if not summary["has_video"] or not summary["has_audio"]:
         raise ValueError("首段试片缺少画面或声音")
     evidence = read_json(require_file(args.evidence_file, "首段质检证据"))
     clip_sha256 = sha256_file(clip)
     if evidence.get("reviewed_clip_sha256") != clip_sha256:
         raise ValueError("首段质检证据未绑定当前试片指纹，请对实际视频重新检查")
+    if not (project.get('video_prompt_spec', {}).get('ad_contract') or {}).get('source_text'):
+        record_confirmed_text_failure(args.project_dir, clip, evidence, project['contract_digest'])
+        require_no_quality_failure(args.project_dir)
     validate_pilot_checks(evidence, project)
     spoken = evidence.get("spoken_words")
     if not isinstance(spoken, str) or not spoken.strip():
@@ -1577,6 +1646,7 @@ def command_review_pilot(args: argparse.Namespace) -> None:
 
 
 def command_stitch(args: argparse.Namespace) -> None:
+    require_no_quality_failure(args.project_dir)
     project = load_project(args.project_dir)
     allowed_stages = {"preflight_passed"} if project["route"] == "postproduction_only" else {"clips_downloaded", "clean_candidate_ready"}
     if project["state"]["stage"] not in allowed_stages:
@@ -1592,6 +1662,8 @@ def command_stitch(args: argparse.Namespace) -> None:
         if not jobs["jobs"] or any(job["status"] not in {"downloaded", "verified"} for job in jobs["jobs"]):
             raise ValueError("并非所有片段都已下载")
         clips = [Path(job["clip_path"]) for job in jobs["jobs"]]
+        for clip in clips:
+            require_original_dimensions(clip, project['settings'])
         edits = None
         if getattr(args, 'tail_evidence_file', None):
             from audio_qc import tail_decision
@@ -1795,10 +1867,8 @@ def command_review(args: argparse.Namespace) -> None:
 
 def command_inspect_visuals(args: argparse.Namespace) -> None:
     video = require_file(args.video, "待检查视频")
-    frames = extract_review_frames(video, args.output_dir, args.boundary or [])
-    print(json.dumps({"manifest_file": str((args.output_dir / "manifest.json").resolve()),
-        "manifest_sha256": sha256_file(args.output_dir / "manifest.json"), "frame_count": len(frames),
-        "status": "awaiting_visual_review", "last_frame": frames[-1]}, ensure_ascii=False, indent=2))
+    from text_inspection import inspect_text
+    print(json.dumps(inspect_text(video, args.output_dir, args.boundary or []), ensure_ascii=False, indent=2))
 
 
 def _extract_srt_text(path: Path) -> str:
@@ -1885,6 +1955,7 @@ def command_subtitles(args: argparse.Namespace) -> None:
 
 
 def command_finalize(args: argparse.Namespace) -> None:
+    require_no_quality_failure(args.project_dir)
     project = load_project(args.project_dir)
     review_kind = "captioned" if project["settings"]["subtitle_choice"] == "enabled" else "clean"
     required_stage = "captioned_review_passed" if review_kind == "captioned" else "clean_review_passed"
@@ -1925,8 +1996,7 @@ def command_finalize(args: argparse.Namespace) -> None:
     if sha256_file(clean_observations) != clean_snapshot.get("sha256"):
         raise ValueError("干净版检查证据在审核后发生变化")
     clean_evidence = read_json(clean_observations)
-    if clean_evidence.get("text_review") or project["settings"].get("character_review_required"):
-        validate_text_review(clean_evidence, clean_candidate, project)
+    validate_text_review(clean_evidence, clean_candidate, project)
     validate_ad_review(project, clean_evidence, video=clean_candidate)
     if review_kind == "captioned":
         validate_ad_review(project, read_json(Path(review["evidence_snapshot"]["path"])), video=candidate)
@@ -1987,11 +2057,13 @@ def command_inspect_audio(args: argparse.Namespace) -> None:
 
 
 def _production_clearance(root, project, index):
+    require_no_quality_failure(root)
     from production_review import validate
     if project['settings'].get('review_mode') != 'continuous_candidate':
         raise ValueError('本项目未确认连续候选制作，不可自动升级旧合同')
     _verify_plan_digest(project)
     job = read_json(root/'jobs.json')['jobs'][index]
+    require_original_dimensions(Path(job['clip_path']), project['settings'])
     path = root/'production-qc'/job['shot_id']/'clearance.json'
     evidence = read_json(require_file(path, '继续制作检查'))
     return validate(evidence, Path(job['clip_path']), project['plan']['segments'][index]['script'], project['contract_digest'])
@@ -2016,6 +2088,7 @@ def command_inspect_production(args):
 
 
 def command_review_production(args):
+    require_no_quality_failure(args.project_dir)
     from production_review import validate
     project = load_project(args.project_dir)
     if project['settings'].get('review_mode') != 'continuous_candidate':raise ValueError('未确认连续候选制作')
@@ -2023,7 +2096,12 @@ def command_review_production(args):
     jobs = read_json(args.project_dir/'jobs.json')['jobs']
     index = next((i for i,j in enumerate(jobs) if j['shot_id']==args.shot), None)
     if index is None or jobs[index]['status'] not in {'downloaded','verified'}:raise ValueError('指定片段尚未下载')
+    require_original_dimensions(Path(jobs[index]['clip_path']), project['settings'])
     evidence = read_json(require_file(args.evidence_file, '继续制作检查'))
+    clip = Path(jobs[index]['clip_path'])
+    if evidence.get('video_sha256') == sha256_file(clip) and evidence.get('contract_digest') == project['contract_digest']:
+        record_confirmed_text_failure(args.project_dir, clip, evidence, project['contract_digest'])
+        require_no_quality_failure(args.project_dir)
     validate(evidence, Path(jobs[index]['clip_path']), project['plan']['segments'][index]['script'], project['contract_digest'])
     atomic_write_json(args.project_dir/'production-qc'/args.shot/'clearance.json', evidence)
     if index == 0 and project['state']['stage'] == 'pilot_review_pending':
@@ -2040,6 +2118,7 @@ def command_advance(args: argparse.Namespace) -> None:
         if args.env_file:argv+=['--env-file',str(args.env_file)]
         if args.provider:argv+=['--provider',args.provider]
         sub=build_parser().parse_args(argv+[command,*extra]);sub.handler(sub)
+    require_no_quality_failure(args.project_dir)
     for _ in range(12):
         project=load_project(args.project_dir);stage=project['state']['stage']
         if stage=='preflight_passed':
@@ -2086,7 +2165,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-file", type=Path, help="可选的私密 .env；必须是普通文件且权限为 600")
     parser.add_argument(
         "--provider",
-        choices=["91topgo", "mikuapi"],
+        choices=["91topgo", "apiaw", "mikuapi"],
         help="视频 Provider；默认使用配置链的首选 91topgo，mikuapi 仅作为显式降级",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
