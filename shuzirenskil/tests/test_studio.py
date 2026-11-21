@@ -90,20 +90,13 @@ class StudioTests(unittest.TestCase):
             'shots':[{'id':'one','kind':'talking_head','script':'你好。','visual_brief':'人物自然挥手问候'},
                      {'id':'two','kind':'talking_head','script':'欢迎。','visual_brief':'人物自然介绍服务'}]}
         self.config={'provider':{'base_url':self.remote.url,'key_env':'STUDIO_TEST_KEY'},
-                     'lip_sync':{'base_url':self.remote.url,'key_env':'STUDIO_TEST_KEY'},
                      'expected_dimensions':[32,56],'expected_fps':8,'test_mode':True}
         self.env=patch.dict(os.environ,{'STUDIO_TEST_KEY':'synthetic-local-only'});self.env.start()
     def tearDown(self):self.ocr_mock.stop();self.env.stop();self.remote.close();self.temp.cleanup()
-    def prepare(self,locked=False):
-        if locked:
-            self.spec['voice']={'mode':'locked_audio','audio_asset':'voice','consistency':'strict'}
-            self.spec['audio_cues']={'audio_sha256':sha256_file(self.root/'master.wav'),'alignment_reviewed':True,
-                'cues':[{'start_seconds':0.1,'end_seconds':3.4,'text':'你好。'},{'start_seconds':3.6,'end_seconds':6.8,'text':'欢迎。'}]}
-            self.spec['shots']=[{'id':'one','kind':'talking_head','cue_start':1,'cue_end':1,'visual_brief':'人物自然介绍服务'},
-                                {'id':'two','kind':'b_roll','cue_start':2,'cue_end':2,'visual_brief':'产品自然转动展示'}]
+    def prepare(self, project_name="project"):
         atomic_write_json(self.root/'spec.json',self.spec);atomic_write_json(self.root/'config.json',self.config)
-        prepare(self.root/'spec.json',self.root/'config.json',self.root/'project')
-        return Studio(self.root/'project')
+        prepare(self.root/'spec.json',self.root/'config.json',self.root/project_name)
+        return Studio(self.root/project_name)
     def approval(self,s):
         value=read_json(s.root/'approval-template.json');value.update(approved_by='synthetic_test_runner',
             expires_at=(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat(),max_attempts=20,max_request_seconds=100)
@@ -145,14 +138,18 @@ class StudioTests(unittest.TestCase):
         self.assertIsNone(s.state['attempts'][0]['reserved_cost'])
         self.assertIsNone(Studio(s.root).status()['cost_reserved'])
         self.assertEqual(len(self.remote.calls),1)
-    def test_missing_lip_price_does_not_block_locked_audio(self):
-        self.config.update(rates={'video_per_second':0.1},currency='USD')
-        s=self.prepare(locked=True);self.approve(s)
-        s.submit('segment_0001');s.poll('segment_0001');self.accept(s,'segment_0001')
-        s.submit('segment_0001');s.poll('segment_0001');self.accept(s,'segment_0001')
-        self.assertIsNotNone(s.state['attempts'][0]['reserved_cost'])
-        self.assertIsNone(s.state['attempts'][1]['reserved_cost'])
-        self.assertIsNone(s.status()['cost_reserved'])
+    def test_old_config_does_not_bind_or_request_unused_service(self):
+        self.config['lip_sync'] = {'key_env': 'FAL_KEY', 'base_url': 'https://queue.fal.run'}
+        del self.spec['voice']
+        self.spec['assets']['voice']['path'] = 'unused-recording.wav'
+        studio = self.prepare()
+        self.assertNotIn('lip_sync', studio.config)
+        self.assertNotIn('audio_rights_confirmed', read_json(studio.root/'approval-template.json'))
+        with patch('studio.load_private_value', return_value='synthetic') as lookup:
+            studio.preflight()
+        self.assertEqual([call.args[0] for call in lookup.call_args_list], ['STUDIO_TEST_KEY'])
+        self.assertEqual(self.remote.calls, [])
+
     def test_only_explicit_monetary_cap_checks_cost(self):
         self.config.update(rates={'video_per_second':0.1},currency='USD')
         s=self.prepare();e=self.approval(s);e.update(max_cost=0.3,currency='USD');s.authorize(e)
@@ -184,23 +181,13 @@ class StudioTests(unittest.TestCase):
         result=s.assemble()
         self.assertEqual(result['duration_seconds'],8)
         self.assertEqual(s.state['status'],'awaiting_final_review')
-    def test_reference_target_preserves_longer_master_audio(self):
-        self.spec['target_seconds']=1
-        s=self.prepare(locked=True)
-        self.assertEqual(s.plan['duration_mode'],'reference')
-        self.assertEqual(s.plan['audio_plan']['delivery_audio_seconds'],7)
-    def test_locked_master_mixed_broll_and_lipsync(self):
-        s=self.prepare(locked=True);self.approve(s)
-        s.submit('segment_0001');s.poll('segment_0001');self.accept(s,'segment_0001')
-        self.assertEqual(s.job('segment_0001')[1]['state'],'lip_ready')
-        with self.assertRaises(ValueError):s.submit('segment_0002')
-        s.submit('segment_0001');self.assertEqual(self.remote.calls[-1][1]['sync_mode'],'cut_off')
-        self.assertEqual(self.remote.calls[-1][2]['X-Fal-No-Retry'],'1')
-        s.poll('segment_0001');self.accept(s,'segment_0001')
-        s.submit('segment_0002');s.poll('segment_0002');self.accept(s,'segment_0002')
-        result=s.assemble();self.assertEqual(result['duration_seconds'],7);self.assertTrue(result['master_audio_preserved'])
-        self.assertEqual(sha256_file(Path(result['video']).parent/'master.wav'),sha256_file(self.root/'master.wav'))
-        self.assertEqual(len(self.remote.calls),3)
+    def test_studio_rejects_new_external_master_before_creating_project(self):
+        self.spec['voice'] = {'mode':'locked_audio', 'audio_asset':'voice'}
+        with self.assertRaisesRegex(ValueError, '视频模型'):
+            self.prepare()
+        self.assertFalse((self.root/'project').exists())
+        self.assertEqual(self.remote.calls, [])
+
     def test_uncertain_post_never_retried_and_recovery(self):
         s=self.prepare();self.approve(s);self.remote.fail_next=True
         with self.assertRaises(TransportError):s.submit('segment_0001')
@@ -245,9 +232,29 @@ class StudioTests(unittest.TestCase):
             with self.subTest(provider=provider):
                 a=Adapter(provider,{'base_url':self.remote.url},'synthetic',loopback=True)
                 task=a.create(payload);result=a.poll(task);dest=self.root/(provider+'.mp4');a.download(result['url'],dest);self.assertTrue(dest.is_file())
-    def test_reference_timbre_explicit_and_veo_inline(self):
-        self.spec['voice']={'mode':'reference_timbre','audio_asset':'voice'};s=self.prepare();self.approve(s);s.submit('segment_0001')
-        self.assertIn('reference_audio',json.dumps(self.remote.calls[-1][1]))
+    def test_reference_sample_goes_to_selected_video_model(self):
+        self.spec['voice'] = {'mode':'reference_timbre','audio_asset':'voice'}
+        for profile, resolution, endpoint in [
+                ('minimax-h3-reference', '768p', '/v2/video_generation'),
+                ('seedance20-reference', '720p', '/api/v3/contents/generations/tasks')]:
+            with self.subTest(profile=profile):
+                self.spec.update(model_profile=profile, resolution=resolution)
+                studio = self.prepare(profile)
+                self.approve(studio)
+                count = len(self.remote.calls)
+                studio.submit('segment_0001')
+                self.assertEqual(len(self.remote.calls), count + 1)
+                path, body, _ = self.remote.calls[-1]
+                self.assertEqual(path, endpoint)
+                sample, = [x for x in body['content'] if x.get('role') == 'reference_audio']
+                actual = base64.b64decode(sample['audio_url']['url'].split(',', 1)[1])
+                self.assertEqual(actual, (self.root/'master.wav').read_bytes())
+                self.assertIn('<SPOKEN_AUDIO_ONLY>\n你好。\n', body['content'][0]['text'])
+                self.assertIsNone(studio.plan['audio_plan'])
+                self.assertFalse(studio.plan['jobs'][0]['requires_lip_sync'])
+                self.assertEqual(studio.plan['jobs'][0]['native_audio_policy'], 'retain_and_review')
+
+    def test_veo_uses_inline_images(self):
         other=copy.deepcopy(self.spec);other['voice']={'mode':'model_generated'};other['model_profile']='veo31-reference';other['resolution']='720p'
         plan=build_plan(other,self.root);self.assertIn('referenceImages',plan['jobs'][0]['request_preview']['payload']['instances'][0])
     def test_legacy_gateway_response_variants_are_preserved(self):

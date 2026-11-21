@@ -12,7 +12,7 @@ from pathlib import Path
 
 from _common import atomic_write_json, digest_json, read_json, require_file, sha256_file
 from ad_contract import AD_KINDS, validate_ad_contract, render_ad_prompt, validate_ad_references
-from audio_timeline import plan_audio, slice_master
+from audio_timeline import slice_master
 from capability_planner import plan_narration
 from media import probe
 from model_registry import load_registry, get_profile, resolve_voice
@@ -34,7 +34,7 @@ def build_plan(spec: dict, base: Path) -> dict:
     if not isinstance(spec.get("name"), str) or not spec["name"].strip():
         raise ValueError("请填写项目 name")
     profile = get_profile(spec.get("model_profile", ""))
-    voice = resolve_voice(profile, spec.get("voice"))
+    voice = resolve_voice(profile, spec.get("voice", {}))
     continuity = spec.get("continuity_mode", "cut")
     if continuity not in {"cut", "continue"} or (continuity == "continue" and not profile.get("continuation_implemented")):
         raise ValueError("所选组合没有实现参考视频续接，请选择 cut 或已接入续接的参考模式")
@@ -113,47 +113,9 @@ def build_plan(spec: dict, base: Path) -> dict:
     validate_direction(design, 'voice_design')
 
     shots = spec.get("shots")
-    audio_plan = None
-    if voice["mode"] == "locked_audio":
-        boundaries = []
-        if shots is not None:
-            if not isinstance(shots, list) or not 1 <= len(shots) <= 500:
-                raise ValueError("严格音轨分镜需要 1–500 项")
-            cursor_cue = 1
-            ids = set()
-            for shot in shots:
-                if not isinstance(shot, dict) or set(shot) != {"id", "kind", "visual_brief", "cue_start", "cue_end"}:
-                    raise ValueError("严格音轨分镜需要 id、kind、visual_brief、cue_start、cue_end")
-                if not isinstance(shot['id'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', shot['id']) or shot['id'] in ids:
-                    raise ValueError("分镜 ID 无效或重复")
-                ids.add(shot['id'])
-                if shot['kind'] not in {'talking_head', 'b_roll'} or not isinstance(shot['visual_brief'], str) or not 4 <= len(shot['visual_brief']) <= 500:
-                    raise ValueError("分镜类型或画面描述无效")
-                if type(shot['cue_start']) is not int or type(shot['cue_end']) is not int or shot['cue_start'] != cursor_cue or shot['cue_end'] < cursor_cue:
-                    raise ValueError("分镜必须按顺序完整覆盖句子，不得重复或遗漏")
-                cursor_cue = shot['cue_end'] + 1
-                boundaries.append(shot['cue_end'])
-            if cursor_cue != len(spec.get('audio_cues', {}).get('cues', [])) + 1:
-                raise ValueError("分镜没有覆盖完整主音轨句子")
-        audio_plan = plan_audio(Path(bound[voice["selected_audio_asset"]]["path"]), spec.get("audio_cues", {}), profile, script, boundaries[:-1])
-        target = spec.get("target_seconds")
-        duration_mode = spec.get("duration_mode", "reference")
-        if duration_mode not in {"reference", "content-fit", "exact"}:
-            raise ValueError("duration_mode 必须为 reference、content-fit 或 exact")
-        if target is not None and (type(target) is not int or target < 1):
-            raise ValueError("目标时长必须是正整数秒")
-        if duration_mode == "exact" and target is None:
-            raise ValueError("exact 模式需要目标时长")
-        if target is not None and duration_mode != "reference" and ((duration_mode == "exact" and abs(target - audio_plan["delivery_audio_seconds"]) > 1 / audio_plan["master"]["sample_rate"])
-                                   or audio_plan["delivery_audio_seconds"] > target):
-            raise ValueError("主音轨实际时长与用户目标冲突；不可裁掉语音或静默拉伸")
-        segments = []
-        for item in audio_plan["segments"]:
-            shot = next((x for x in (shots or []) if x['cue_start'] <= item['cue_start'] <= x['cue_end']), None)
-            segments.append({**item, "shot_id": shot['id'] if shot else "narration",
-                             "kind": shot['kind'] if shot else "talking_head",
-                             "visual_brief": shot['visual_brief'] if shot else "自然正视镜头，克制动作"})
-    elif shots is None:
+    if spec.get("audio_cues") is not None:
+        raise ValueError("新口播由视频模型生成台词，不使用外部主音轨时间码 audio_cues")
+    if shots is None:
         timing = plan_narration(script, profile, target=spec.get("target_seconds"), mode=spec.get("duration_mode", "reference"), speech_rate_cpm=spec.get("speech_rate_cpm", 260))
         segments = [{**s, "shot_id": "narration", "kind": "talking_head", "visual_brief": "自然正视镜头，克制动作"} for s in timing["segments"]]
     else:
@@ -194,11 +156,11 @@ def build_plan(spec: dict, base: Path) -> dict:
 
     if type(spec.get('merge_shots', False)) is not bool:
         raise ValueError("merge_shots 必须为布尔值")
-    # Optional conservative merge: same modality only, never merge the pilot or locked-audio cuts.
-    # Different modalities keep independent review/lip-sync contracts.
+    # Optional conservative merge: same modality only, never merge the pilot.
+    # Different modalities keep independent review criteria.
     if spec.get('merge_shots'):
-        if audio_plan or continuity == 'continue':
-            raise ValueError("镜头合并仅用于原生声音 cut 路线；严格音轨按已审时间边界执行")
+        if continuity == 'continue':
+            raise ValueError("镜头合并仅用于原生声音 cut 路线")
         merged = []
         for seg in segments:
             previous = merged[-1] if len(merged) > 1 else None
@@ -224,7 +186,7 @@ def build_plan(spec: dict, base: Path) -> dict:
         prompt = "；".join(f"{k}: {v}" for k, v in bible.items()) + "。\n" + segment["visual_brief"]
         prompt += "。生成真实连续动态画面，禁止照片拼贴或静态照片推拉。\n" + ad_prompt
         audio_token = None
-        if is_talking and voice["mode"] != "locked_audio":
+        if is_talking:
             prompt += '\n' + audio_only_dialogue(segment['script']) + f"\n角色声音设计：{design}"
             if voice["send_audio_to_video_model"]:
                 audio_token = "asset://" + bound[voice["selected_audio_asset"]]["sha256"]
@@ -238,36 +200,34 @@ def build_plan(spec: dict, base: Path) -> dict:
         jobs.append({**segment, "index": index, "job_id": f"segment_{index:04d}",
                      "planned_start_seconds": round(cursor, 6), "planned_end_seconds": round(cursor + use_seconds, 6),
                      "consistency_digest": digest_json(lock), "pilot_review_dependency": index > 1,
-                     "native_audio_policy": "discard" if voice["mode"] == "locked_audio" or not is_talking else "retain_and_review",
-                     "requires_lip_sync": voice["mode"] == "locked_audio" and is_talking,
+                     "native_audio_policy": "discard" if not is_talking else "retain_and_review",
+                     "requires_lip_sync": False,
                      "request_preview": preview})
         cursor += use_seconds
     blockers = ["此文件是本地生产计划；需经 studio.py 建立项目、记录已确认的制作范围后提交，无需报价",
                 "需要账号级能力验收、素材传输和按既有流程确认图片与付费上限"]
-    if voice["mode"] == "locked_audio":
-        blockers.append("严格音轨需要单独配置并授权 fal 口型处理；最终保留完整主音轨")
     if any(j["request_preview"]["payload"] is None for j in jobs):
         blockers.append("当前模型仅登记能力，尚无请求编译器")
     result = {"schema_version": "production-plan-1.0", "status": "offline_plan_ready", "execution_allowed": False,
               "name": spec["name"], "purpose": purpose, "duration_mode": spec.get("duration_mode", "reference"), "target_seconds": spec.get("target_seconds"), "model_snapshot": profile, "voice": voice,
               "assets": bound, "ignored_asset_ids": sorted(set(assets) - set(selected)),
               "consistency_contract": lock, "continuity_mode": continuity, "jobs": jobs,
-              "resolution": resolution, "aspect_ratio": ratio, "audio_cues": spec.get("audio_cues"),
-              "audio_plan": audio_plan, "ad_contract": ad,
+              "resolution": resolution, "aspect_ratio": ratio, "audio_cues": None,
+              "audio_plan": None, "ad_contract": ad,
               "planned_delivery_seconds": round(cursor, 6), "request_count": len(jobs),
               "request_seconds": sum(j["request_seconds"] for j in jobs), "cost_estimate": None,
               "cost_note": "报价不是制作前置条件；未知金额不阻断已授权请求，也不代表免费",
-              "actual_timeline_required": audio_plan is None,
+              "actual_timeline_required": True,
               "required_reviews": ["逐段正常速度看听", "台词", "人物与产品身份", "口型", "跨段音色", "接缝", "画面文字", "广告事实和行动引导"],
               "execution_blockers": blockers}
     mode = spec.get('review_mode', 'auto')
-    eligible = purpose == 'narration' and not audio_plan and all(j['kind'] == 'talking_head' and j['native_audio_policy'] == 'retain_and_review' for j in jobs)
+    eligible = purpose == 'narration' and all(j['kind'] == 'talking_head' and j['native_audio_policy'] == 'retain_and_review' for j in jobs)
     if mode == 'auto':mode = 'continuous_candidate' if eligible else 'full_per_segment'
     if mode not in {'full_per_segment', 'continuous_candidate'}:
         raise ValueError('review_mode 无效')
     if mode == 'continuous_candidate':
         if not eligible:
-            raise ValueError('连续候选制作仅适用于普通原生声音口播；严格音轨、广告和 B-roll 保留原验收流程')
+            raise ValueError('连续候选制作仅适用于普通原生声音口播；广告和 B-roll 保留原验收流程')
         from production_review import NOTICE
         result['review_mode'] = mode
         result['review_notice'] = NOTICE
@@ -282,7 +242,7 @@ def main() -> int:
     plan = commands.add_parser("plan", help="生成可审查的生产计划与脱敏请求预览")
     plan.add_argument("--spec", type=Path, required=True)
     plan.add_argument("--output", type=Path, required=True)
-    audio = commands.add_parser("slice-audio", help="把严格音频计划按样本切成 WAV")
+    audio = commands.add_parser("slice-audio", help="仅供恢复历史计划的音频切片")
     audio.add_argument("--plan", type=Path, required=True)
     audio.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()

@@ -73,7 +73,12 @@ def prepare(spec_path, config_path, directory):
     if directory.exists():raise ValueError('项目目录已存在，请选择新目录以保留历史')
     plan=build_plan(read_json(spec_path),spec_path.resolve().parent)
     if any(j['request_preview']['payload'] is None for j in plan['jobs']):raise ValueError('此模型没有新执行适配器；请使用其旧入口或选择已接入模型')
-    config=read_json(config_path);config_check(config,plan)
+    config = read_json(config_path)
+    if not isinstance(config, dict):
+        raise ValueError("执行配置必须是包含视频服务设置的 JSON 对象")
+    # Older example configs included a separate service that new projects never use.
+    config.pop('lip_sync', None)
+    config_check(config,plan)
     contract={'plan_digest':plan['plan_digest'],'config_digest':digest_json(config),'version':'studio-1.1-tail-qc'}
     contract['digest']=digest_json(contract)
     directory.mkdir(parents=True)
@@ -84,8 +89,10 @@ def prepare(spec_path, config_path, directory):
         state['jobs'][job['job_id']]={'state':'planned','revision':0,'phase':'video','task':None,'clip':None}
     atomic_write_json(directory/'state.json',state)
     template={'contract_digest':contract['digest'],'approved_by':'','expires_at':'','images_reviewed':False,
-              'script_and_voice_approved':False,'asset_upload_approved':False,'audio_rights_confirmed':False,
+              'script_and_voice_approved':False,'asset_upload_approved':False,
               'unverified_provider_pilot_approved':False,'max_attempts':0,'max_request_seconds':0}
+    if plan['voice']['send_audio_to_video_model']:
+        template['audio_rights_confirmed'] = False
     atomic_write_json(directory/'approval-template.json',template)
     return {'status':'awaiting_authorization','contract_digest':contract['digest'],'project':str(directory.resolve()),
             'video_requests':len(plan['jobs']),'lip_sync_requests':sum(j['requires_lip_sync'] for j in plan['jobs']),

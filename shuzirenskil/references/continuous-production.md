@@ -11,7 +11,7 @@
 
 - Grok 旧入口：`python scripts/run.py workflow --project-dir <新项目> prepare ... --review-mode continuous_candidate`。
 - 多模型入口：spec 顶层增加 `"review_mode":"continuous_candidate"`，随后按原流程 prepare / authorize。
-- 广告、严格主音轨、含空镜，以及用户明确要求逐段审片：使用 `full_per_segment`，保留原有关卡。不要为使用新模式降级声音或改变素材要求。
+- 广告、含空镜，以及用户明确要求逐段审片：使用 `full_per_segment`，保留原有关卡。不要为使用新模式降级声音或改变素材要求。
 
 安装环境后先执行 `python scripts/run.py doctor --self-test`，要求 `continuous_production_ready=true`。AI 还必须能真正读取图片。缺能力在生成前解决；本地 Python、FFmpeg、Whisper、VAD、OCR 均由安装器准备，不能要求学员逐个手工配置。
 

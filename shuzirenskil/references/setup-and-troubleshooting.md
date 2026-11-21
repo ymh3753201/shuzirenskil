@@ -6,6 +6,8 @@ rc6 推荐执行 `python scripts/setup_environment.py` 自动准备独立 Python
 
 ## 密钥保存
 
+只核对本次使用的视频服务。口播与参考音色都由该视频模型生成。本地识别用于核对成片台词。
+
 新用户优先使用系统凭据库：Windows Credential Manager、macOS Keychain、Linux Secret Service。不要只创建空 `.env` 就说配置完成。不要把用户已提供的密钥再次贴进聊天、命令参数、源码、报告或飞书。
 
 在同一 Python 环境安装 `keyring`，再在本机交互终端运行 `scripts/credential_store.py set --name 变量名`。程序隐藏输入、保存到系统凭据库并回读校验；已有值不会覆盖，用户明确要更新时用 `--replace`。随后新开一个进程运行 `scripts/credential_store.py status --name 变量名`，只报告是否配置。若系统凭据库不可用，明确说明缺项，不静默保存明文。不要为了在无交互工具中运行而关闭隐藏输入；向用户展示本机终端输入入口。

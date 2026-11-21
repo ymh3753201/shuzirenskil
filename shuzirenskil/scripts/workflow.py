@@ -264,8 +264,10 @@ def command_prepare(args: argparse.Namespace) -> None:
         raise ValueError("model_generated 不发送声音参考，请移除 --preset-voice 或明确选择 preset_voice")
     if voice_mode == "preset_voice" and not preset_voices:
         raise ValueError("preset_voice 必须指定 --preset-voice，且仍受供应商实际能力检查")
-    if voice_mode in {"reference_timbre", "locked_audio"}:
-        raise ValueError("现有 Grok 网关执行器未开放此声音路线；请先使用 production_plan.py 生成多模型/严格音频计划，不能降级成自由配音")
+    if voice_mode not in {"model_generated", "preset_voice", "reference_timbre"}:
+        raise ValueError("当前 Grok 口播由视频模型生成台词，不支持所选声音模式")
+    if voice_mode == "reference_timbre":
+        raise ValueError("当前 Grok 网关支持生成人声，不支持上传音色样本。如需参考音色，请选择支持该输入的视频模型。")
     if len(preset_voices) > 3 or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", item) for item in preset_voices):
         raise ValueError("预设声音最多 3 个，voice_id 只能包含字母、数字、下划线或短横线")
     if preset_voices and args.generation_mode != "reference-to-video":
@@ -2200,7 +2202,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--no-pilot-first", action="store_true", help="仅供兼容旧流程；多段新项目默认先检查首段试片")
     prepare.add_argument('--review-mode', choices=['auto','full_per_segment','continuous_candidate'], default='auto', help='新普通口播默认连续制作候选片，主观看听统一留到全片验收；广告等保留完整关卡')
     prepare.add_argument("--preset-voice", action="append", help="最多 3 个 xAI 预设 voice_id；MikuAPI 透传验收前不会进入付费预检")
-    prepare.add_argument("--voice-mode", choices=["model_generated", "preset_voice", "reference_timbre", "locked_audio"], help="显式选择声音；现有网关只执行已验证范围，参考音色/严格音轨请先使用多模型规划入口")
+    prepare.add_argument("--voice-mode", choices=["model_generated", "preset_voice", "reference_timbre"], help="默认由 Grok 生成口播人声。当前网关不支持参考音色")
     prepare.add_argument(
         "--duration-capability-test",
         action="store_true",

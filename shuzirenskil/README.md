@@ -6,7 +6,7 @@
 
 2026-10-24 安装修订：系统凭据库、分服务商接口合同、Seedance 2.0 与 AI 跃云独立适配已加入；真实验证范围分别记录。
 
-2026-10-18 升级开发：新增完整多模型执行入口 `scripts/studio.py`，接通 Wan 3、MiniMax H3/H3 Max、Seedance 2.5、Veo 3.1、91topgo 与独立 fal 口型处理。支持可选音频参考、主音轨、长片续接、混合广告分镜、恢复与验收交付；MikuAPI 保留旧入口。本地代码和模拟接口测试通过，真实账号/生成质量仍须试片。先读 [执行指南](references/studio-execution.md) 与 [声音和规划](references/multimodel-production.md)。
+新口播默认由视频模型按台词生成声音。明确要求参考音色时，通过支持该输入的视频模型传入指定样本。Grok 网关支持生成口播人声，Seedance 2.0 和 MiniMax H3 的参考模式另支持音频样本。见 [执行指南](references/studio-execution.md)。
 
 公开分享版：仓库只包含 Skill 代码和空白配置示例。视频服务商账号仍须使用者自己准备；使用 Codex 内置生图或已有图片时，无须配置第三方图片 API。不要把填好的 `.env` 上传到 GitHub、飞书或聊天窗口。
 

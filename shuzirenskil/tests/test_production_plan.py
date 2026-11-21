@@ -56,13 +56,13 @@ class RoutingTests(unittest.TestCase):
         for mode in ("model_generated", "reference_timbre"):
             with self.assertRaises(ValueError):
                 resolve_voice(get_profile("wan3-reference"), {"mode": mode, "consistency": "strict", "audio_asset": "voice"})
-        locked = resolve_voice(get_profile("veo31-reference"), {"mode": "locked_audio", "audio_asset": "voice", "consistency": "strict"})
-        self.assertFalse(locked["send_audio_to_video_model"])
+        with self.assertRaisesRegex(ValueError, "视频模型"):
+            resolve_voice(get_profile("veo31-reference"), {"mode": "locked_audio", "audio_asset": "voice", "consistency": "strict"})
         with self.assertRaises(ValueError):
             resolve_voice(get_profile("wan3-reference"), {"mode": "model_generated", "audio_asset": "voice"})
 
     def test_native_payload_shapes_and_audio_omission(self):
-        for key in ("wan3-reference", "minimax-h3-reference", "91topgo-grok-reference"):
+        for key in ("wan3-reference", "minimax-h3-reference", "seedance20-reference", "91topgo-grok-reference", "aihge-grok-reference"):
             p = get_profile(key)
             args = dict(prompt="人物自然讲话。", seconds=8, resolution=p["resolutions"][0], ratio="9:16", images=["asset://image"])
             request = compile_preview(p, **args)
@@ -134,8 +134,11 @@ class ProductionTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_unused_audio_is_not_read_bound_or_compiled(self):
-        self.spec["assets"]["voice"]["path"] = "absent-private-audio.wav"
+        del self.spec["voice"]
+        self.spec["assets"]["voice"]["path"] = "unused-recording.wav"
         result = build_plan(self.spec, self.root)
+        self.assertEqual(result["voice"]["mode"], "model_generated")
+        self.assertIsNone(result["audio_plan"])
         self.assertEqual(result["ignored_asset_ids"], ["voice"])
         self.assertNotIn("voice", result["assets"])
         self.assertNotIn("reference_audio", json.dumps(result["jobs"]))
@@ -193,15 +196,14 @@ class ProductionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             slice_master(plan, self.root / "bad-slices")
 
-    def test_locked_audio_never_sent_as_timbre_and_is_not_marked_delivered(self):
+    def test_legacy_master_cannot_be_selected_for_new_video(self):
         self.spec["voice"] = {"mode": "locked_audio", "consistency": "strict", "audio_asset": "voice"}
         self.spec["audio_cues"] = self.cues
-        result = build_plan(self.spec, self.root)
-        self.assertEqual(result["planned_delivery_seconds"], 10)
-        self.assertFalse(result["execution_allowed"])
-        self.assertTrue(result["jobs"][0]["requires_lip_sync"])
-        self.assertNotIn("reference_audio", json.dumps(result["jobs"]))
-        self.assertEqual(result["jobs"][0]["native_audio_policy"], "discard")
+        with self.assertRaisesRegex(ValueError, "视频模型"):
+            build_plan(self.spec, self.root)
+        del self.spec["voice"]
+        with self.assertRaisesRegex(ValueError, "audio_cues"):
+            build_plan(self.spec, self.root)
 
     def test_explicit_shots_keep_broll_separate_and_complete_script(self):
         self.spec["shots"] = [{"id": "talk", "kind": "talking_head", "script": self.script, "visual_brief": "人物自然介绍服务"},
@@ -244,7 +246,7 @@ class ProductionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_plan(self.spec, self.root)
 
-    def test_reference_audio_duration_and_locked_target_are_checked(self):
+    def test_reference_audio_duration_is_checked(self):
         self.spec["voice"] = {"mode": "reference_timbre", "audio_asset": "voice"}
         self.spec["model_profile"] = "minimax-h3-reference"
         self.spec["resolution"] = "768p"
@@ -252,13 +254,7 @@ class ProductionTests(unittest.TestCase):
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b"\0\0" * 16000)
         with self.assertRaises(ValueError):
             build_plan(self.spec, self.root) # H3 reference must be at least 2s
-        self.spec["voice"] = {"mode": "locked_audio", "audio_asset": "voice"}
-        self.spec["audio_cues"] = {"audio_sha256": sha256_file(self.audio), "alignment_reviewed": True,
-                                   "cues": [{"start_seconds": 0, "end_seconds": 1, "text": self.script}]}
-        self.spec["duration_mode"] = "exact"
-        self.spec["target_seconds"] = 8
-        with self.assertRaisesRegex(ValueError, "实际时长"):
-            build_plan(self.spec, self.root)
+
 
 
 if __name__ == "__main__":

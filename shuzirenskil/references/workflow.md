@@ -1,6 +1,6 @@
 # 执行流程
 
-rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，doctor 实测；自动音频报告不替代真实听审。既定范围用 advance 持续推进，首段检查通过后不追加用户确认。新入口原生声音安全裁尾与严格音轨保护分别处理。
+rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，doctor 实测；自动音频报告不替代真实听审。既定范围用 advance 持续推进，首段检查通过后不追加用户确认。
 
 2026-10-18：本文件描述现有 Grok 执行器。多模型离线计划见 `multimodel-production.md`。首段每项观察改用 `{"status":"pass|fail|pending","observations":"至少8字真实观察"}`；只有全部明确 pass 才放行。旧纯文字记录需重新验收，已通过但尚未提交后续片段的项目可再次 `review-pilot`，旧报告自动保存在 `review-history/`。
 
@@ -9,7 +9,7 @@ rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，docto
 
 ## 1. 方案前
 
-清点材料，确定 `topic_only`、`new_video` 或 `postproduction_only`。已有视频默认不重新生成。已有音频默认只提供内容、语速和情绪参考；只有官方可信合作方权限与 MikuAPI 透传都确认后，才可以另行设计自有声音参考上传。
+清点材料，确定 `topic_only`、`new_video` 或 `postproduction_only`。已有视频默认不重新生成。Grok 按确认稿生成人声。仅当用户要求提取录音内容时才本地转写；明确要求参考自己的音色时，按多模型指南选用支持音频参考的组合。
 
 先按 `duration-planning.md` 确定用户目标、上限或内容推算。使用 `plan` 免费检查草稿；AI 自写稿在提交完整方案前自行改到合适的信息量。普通指定时长使用默认 `reference`，只有内容时省略时长；只有明确硬性要求才用 `exact` 或带上限的 `content-fit`。规划合适后再按实际分段设计表演并 `prepare`。
 

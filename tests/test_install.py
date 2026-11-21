@@ -43,6 +43,18 @@ class InstallTests(unittest.TestCase):
             installed = self.target/Path(name).relative_to('shuzirenskil')
             self.assertEqual(hashlib.sha256(installed.read_bytes()).hexdigest(), digest)
 
+    def test_installed_examples_only_configure_video_for_speech(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            installer.install(self.project)
+        assets = self.target / 'assets'
+        config = json.loads((assets / 'studio-config.example.json').read_text(encoding='utf-8'))
+        production = json.loads((assets / 'production-spec-example.json').read_text(encoding='utf-8'))
+        self.assertIn('key_env', config['provider'])
+        self.assertNotIn('lip_sync', config)
+        self.assertEqual(production.get('voice', {}).get('mode', 'model_generated'), 'model_generated')
+        self.assertNotIn('audio_asset', production.get('voice', {}))
+        self.assertFalse(any(item['kind'] == 'audio' for item in production['assets'].values()))
+
     def test_existing_skill_is_preserved(self):
         self.target.mkdir(parents=True)
         original = self.target/'user-file.txt'

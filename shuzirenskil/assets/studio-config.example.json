@@ -3,10 +3,6 @@
     "base_url": "https://YOUR-WORKSPACE.cn-beijing.maas.aliyuncs.com",
     "key_env": "DASHSCOPE_API_KEY"
   },
-  "lip_sync": {
-    "base_url": "https://queue.fal.run",
-    "key_env": "FAL_KEY"
-  },
   "expected_dimensions": [
     720,
     1280

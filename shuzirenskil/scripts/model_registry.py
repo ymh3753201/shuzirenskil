@@ -48,20 +48,18 @@ def resolve_voice(profile: dict, choice: dict) -> dict:
     """A provided audio file is inert unless the user explicitly selects it."""
     if not isinstance(choice, dict) or set(choice) - {"mode", "consistency", "audio_asset"}:
         raise ValueError("voice 仅接受 mode、consistency、audio_asset")
-    mode = choice.get("mode")
+    mode = choice.get("mode", "model_generated")
     consistency = choice.get("consistency", "best_effort")
-    if mode not in {"model_generated", "reference_timbre", "locked_audio"}:
-        raise ValueError("必须明确选择 model_generated、reference_timbre 或 locked_audio")
-    if consistency not in {"best_effort", "strict"}:
-        raise ValueError("consistency 必须为 best_effort 或 strict")
-    if consistency == "strict" and mode != "locked_audio":
-        raise ValueError("严格声音一致必须选择 locked_audio；提示词与参考音色都不能保证相同音轨")
+    if mode == "locked_audio" or consistency == "strict":
+        raise ValueError("新口播由视频模型生成台词，不能原样保留整条录音。参考音色只用于生成新的声音。")
+    if mode not in {"model_generated", "reference_timbre"} or consistency != "best_effort":
+        raise ValueError("声音模式支持 model_generated 或 reference_timbre，consistency 仅支持 best_effort")
+    if profile.get("native_speech") is not True:
+        raise ValueError("当前组合未确认能生成口播人声，请选择支持人声输出的视频模型")
     asset = choice.get("audio_asset")
     if mode == "model_generated":
         if asset is not None:
             raise ValueError("自由配音不能同时选定 audio_asset；可把文件保留在素材库，但不选入 voice")
-        if profile.get("native_speech") is not True:
-            raise ValueError("当前组合未确认原生人声能力，请选择独立音频路线")
     elif not isinstance(asset, str) or not asset.strip():
         raise ValueError(f"{mode} 必须选定 audio_asset")
     if mode == "reference_timbre" and profile.get("reference_timbre") is not True:
@@ -70,7 +68,7 @@ def resolve_voice(profile: dict, choice: dict) -> dict:
         "mode": mode, "consistency": consistency,
         "selected_audio_asset": asset,
         "send_audio_to_video_model": mode == "reference_timbre",
-        "audio_processing": "external_audio_driver_or_lipsync_required" if mode == "locked_audio" else "native_audio",
-        "requires_master_audio_preservation": mode == "locked_audio",
+        "audio_processing": "native_audio",
+        "requires_master_audio_preservation": False,
         "voice_identity_guaranteed_by_model": False,
     }

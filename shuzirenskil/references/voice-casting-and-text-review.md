@@ -3,7 +3,7 @@
 > 2026-11-06 更新：所有新生成画面全程无字，普通口播与广告一致。本文旧原生文字白名单仅供历史记录追溯，不能据此创建新请求；详见 [全程无字生成规则](text-free-generation.md)。
 
 
-2026-10-18：首段所有观察项（包括 voice_casting_match、no_generated_text）必须使用包含 `status` 和 `observations` 的对象；旧纯文字不再视为通过。新模板为 `assets/pilot-review-template.json`。多模型的自由配音、参考音色与严格音轨规划见 `multimodel-production.md`，本文件其余内容描述现有 Grok 执行流程。
+2026-10-18：首段所有观察项（包括 voice_casting_match、no_generated_text）必须使用包含 `status` 和 `observations` 的对象；旧纯文字不再视为通过。新模板为 `assets/pilot-review-template.json`。多模型的模型配音与参考音色规划见 `multimodel-production.md`，本文件其余内容描述现有 Grok 执行流程。
 
 ## 1. 先做配音选角，再锁定声音
 
@@ -47,7 +47,7 @@ python3 scripts/workflow.py --project-dir <项目> review-character --evidence-f
 
 ## 3. 首段是后续声音的听感基准
 
-新普通口播在方案中选定 `continuous_candidate` 时，按 `continuous-production.md` 区分继续制作检查与最终验收。以下真实听审要求用于最终合格结论；缺少主观看听能力不得逐段中断已授权制作。历史项目、广告及严格音轨仍用原完整关卡。
+新普通口播在方案中选定 `continuous_candidate` 时，按 `continuous-production.md` 区分继续制作检查与最终验收。以下真实听审要求用于最终合格结论；缺少主观看听能力不得逐段中断已授权制作。历史项目和广告仍用原完整关卡。
 
 首段正常速度完整看听，记录 `voice_casting_match`：实际音高、声音质地、共鸣与咬字是否接近已确认选角。自然但不符合角色的声音也不能直接当作通过。`review-pilot` 记录试片文件指纹和声音方案指纹；剩余各段仍用相同声音描述和主图。
 

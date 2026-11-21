@@ -3,9 +3,9 @@
 > 2026-11-06 更新：所有新生成画面全程无字，普通口播与广告一致。本文旧原生文字白名单仅供历史记录追溯，不能据此创建新请求；详见 [全程无字生成规则](text-free-generation.md)。
 
 
-rc7：新普通原生声音口播先读 `continuous-production.md`，继续制作检查不等于最终合格；不得逐段找用户确认。历史/广告/严格音轨保持完整关卡。
+rc7：新普通原生声音口播先读 `continuous-production.md`，继续制作检查不等于最终合格；不得逐段找用户确认。历史项目和广告保持完整关卡。
 
-rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，doctor 实测；自动音频报告不替代真实听审。既定范围用 advance 持续推进，首段检查通过后不追加用户确认。新入口原生声音安全裁尾与严格音轨保护分别处理。
+rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，doctor 实测；自动音频报告不替代真实听审。既定范围用 advance 持续推进，首段检查通过后不追加用户确认。
 
 新规则见 `voice-casting-and-text-review.md`：每个原片和最终成片检查全片、全部取样和真实末帧，`no_generated_text=pass` 必须带绑定视频指纹的 `text_review`。首段先检查角色声线匹配；最终逐段对照首段实听并记录 `voice_casting_match` 和跨段一致性。
 
@@ -24,7 +24,7 @@ rc6：先读 `automatic-quality.md`。环境由 setup_environment 准备，docto
 - 任务账本中每段提交次数不超过 1。
 - 日志、合同和交付文件不含 API Key、Authorization 或图片 Base64。
 - 请求模式没有混用 `image` 和 `reference_images`；多参考图的数量、顺序、职责和提示词标签一致。
-- Files API 输入只来自用户确认图片，上传账本权限为 600 且设置自动过期；没有上传用户自己的音频文件。
+- Files API 输入只来自用户确认图片，上传账本权限为 600 且设置自动过期；Grok 不上传录音。多模型口播仅在明确选择音色参考时随视频请求传入指定样本。
 
 ## Codex 视觉检查
 
