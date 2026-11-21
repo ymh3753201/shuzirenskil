@@ -88,7 +88,7 @@
     "shuzirenskil/tests/test_no_text_regression.py": "4bfc8afaa907f699362c5dfada5bb04b1176e87268a492b5ef26f11831af2f60",
     "shuzirenskil/tests/test_planner.py": "1c0f1238b16e9f61bd858a8c0fca4faaae007f090c1d55ab8f82a786a53c9598",
     "shuzirenskil/tests/test_production_plan.py": "e718ff4764f80849f5407cd13897330e5a7064baf59a252c372d86a5d08b16d5",
-    "shuzirenskil/tests/test_provider_chain.py": "21b480e1bbfd445efe8e234569d78a40dfa5f513ebafbe3dba6521e3c236bdba",
+    "shuzirenskil/tests/test_provider_chain.py": "b492d8cd6fb76a1bc749871432f338e33cd540983deeea4777278c35585dfb4e",
     "shuzirenskil/tests/test_provider_contract.py": "7dc47792c51002814cb61f00c073f4ea6d10d2993358989c4a8677f3b04aaf7b",
     "shuzirenskil/tests/test_quality_contract.py": "ab9fa527988409d3bc07989c0b1f1cc8fc38f2b796ec2544ab8a8704463fdf79",
     "shuzirenskil/tests/test_release_gates.py": "4926b2f4aaad170a7bfb604031c96fa586be69f44f027b2989651f4449ec45c1",

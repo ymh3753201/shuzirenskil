@@ -46,7 +46,7 @@ class ProviderChainTests(unittest.TestCase):
         import json
         path = SKILL_DIR / 'assets' / 'provider-chain.json'
         self.assertEqual(_load_video_config(path)['provider_id'], 'apiaw')
-        self.assertEqual(json.loads(path.read_text())['fallback_providers'], ['91topgo'])
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))['fallback_providers'], ['91topgo'])
 
     def test_91topgo_and_legacy_mikuapi_protocols(self) -> None:
         chain = _load_video_config(SKILL_DIR / "assets" / "provider-chain.json", "91topgo")
