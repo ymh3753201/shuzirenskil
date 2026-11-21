@@ -39,7 +39,7 @@ class FallbackTests(unittest.TestCase):
         self.assertFalse(can_resume_rejected_fallback(job,project))
 
     def run_case(self, errors):
-        chain=json.loads(default_config_path().read_text())
+        chain=json.loads(default_config_path().read_text(encoding="utf-8"))
         primary=_load_video_config(default_config_path(), '91topgo')
         backup=_load_video_config(default_config_path(), 'apiaw')
         job={'shot_id':'shot_001'};ledger={'jobs':[job]}

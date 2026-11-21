@@ -108,7 +108,7 @@ def submit_with_fallback(job, ledger, ledger_path, config, payload, project, arg
                 from workflow import _provider_reference_payload
                 references = provider_input.get('reference_images') if provider_input['mode'] == 'reference-to-video' else [provider_input['image']]
                 payload = {k: payload[k] for k in ('model', 'prompt', 'aspect_ratio', 'resolution')}
-                dry = json.loads((args.project_dir / 'requests' / 'dry-run' / f"{job['shot_id']}.json").read_text())['payload']
+                dry = json.loads((args.project_dir / 'requests' / 'dry-run' / f"{job['shot_id']}.json").read_text(encoding="utf-8"))['payload']
                 payload['seconds'] = str(dry.get('seconds', dry.get('duration')))
                 payload['reference_images'] = [_provider_reference_payload(ref, config) for ref in references]
             else:

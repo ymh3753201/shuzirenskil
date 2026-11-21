@@ -380,7 +380,15 @@ def extract_review_frames(video: Path, output_dir: Path, extra_times: list[float
     output_dir.mkdir(parents=True, exist_ok=True)
     indices = sorted(selected)
     expression = "+".join(f"eq(n\\,{index})" for index in indices)
-    run([ffmpeg, "-y", "-i", str(video), "-vf", "select=" + expression, "-vsync", "0", "-q:v", "2", str(output_dir / "review_%05d.jpg")])
+    inputs = [ffmpeg, "-y", "-i", str(video), "-vf", "select=" + expression]
+    output = ["-q:v", "2", str(output_dir / "review_%05d.jpg")]
+    try:
+        run(inputs + ["-fps_mode", "passthrough"] + output)
+    except subprocess.CalledProcessError as exc:
+        # Older FFmpeg builds only support the former name for this sampling mode.
+        if "Unrecognized option 'fps_mode'" not in (exc.stderr or ""):
+            raise
+        run(inputs + ["-vsync", "0"] + output)
     records = []
     for number, index in enumerate(indices, 1):
         target = output_dir / f"review_{number:05d}.jpg"
